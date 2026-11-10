@@ -142,21 +142,22 @@ RUSTFLAGS="-C target-feature=+crt-static" cargo ndk -t arm64-v8a --platform 30 b
 打包工具从小米服务器上这个版本的完整更新包中取出原厂 recovery 分区，只读取这个分区所在的部分，并且按照设备配置文件核对 SHA-256：
 
 ```sh
-target/release/skyward-pack stock --config devices/nezha.toml --out target/stock/nezha/recovery.img
+target/release/skyward-pack stock --config devices/bixi.toml --out target/stock/bixi/recovery.img
 ```
 
 然后在它的基础上构建镜像：
 
 ```sh
 target/release/skyward-pack recovery \
-  --stock target/stock/nezha/recovery.img \
+  --stock target/stock/bixi/recovery.img \
   --binary target/aarch64-linux-android/release/skyward \
   --system-init target/system-init/aarch64-linux-android/release/system-init \
-  --config devices/nezha.toml \
+  --config devices/bixi.toml \
   --font resources/fonts/MiSansVF.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --out target/skyward-nezha.img
+  --extra ../bixi_extra \
+  --out target/skyward-bixi.img
 ```
 
 测试和代码检查在电脑上运行；只在手机上运行的代码按照手机目标检查：
