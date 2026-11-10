@@ -1,0 +1,10 @@
+[device]
+codename = "t5"
+
+[wipe]
+logs = ["/data"]
+
+[stock]
+version = "X1"
+package = "https://a.com/X1.zip"
+recovery = "0000000000000000000000000000000000000000000000000000000000000000"
