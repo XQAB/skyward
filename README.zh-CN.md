@@ -85,44 +85,21 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 | 机型 | 代号 | 测试的系统版本 |
 | --- | --- | --- |
-| 小米 17 Ultra | `nezha` | OS4.0.4.0.XPACNXM（Android 17） |
-| 小米 13 Ultra | `ishtar` | OS3.0.308.0.WMACNXM（Android 16） |
+| 小米 MIX Flip 2 | `bixi` | OS4.0.0.11.XOHCNXM（Android 16） |
 
-### 🚧 施工中
-
-这些机型的镜像按照各自的原厂固件构建，还没有在真机上试过。屏幕、触摸、WLAN 和振动已经配置好，不会解密 data 分区。
-
-| 机型 | 代号 | 构建所用的系统版本 |
-| --- | --- | --- |
-| 🚧 小米 13 | `fuxi` | OS3.0.309.0.WMCCNXM（Android 16） |
-| 🚧 小米 13 Pro | `nuwa` | OS3.0.312.0.WMBCNXM（Android 16） |
-| 🚧 小米 14 | `houji` | OS3.0.307.0.WNCCNXM（Android 16） |
-| 🚧 小米 14 Pro | `shennong` | OS3.0.309.0.WNBCNXM（Android 16） |
-| 🚧 小米 14 Ultra | `aurora` | OS3.0.308.0.WNACNXM（Android 16） |
-| 🚧 小米 15 | `dada` | OS3.0.307.0.WOCCNXM（Android 16） |
-| 🚧 小米 15 Pro | `haotian` | OS3.0.309.0.WOBCNXM（Android 16） |
-| 🚧 小米 15 Ultra | `xuanyuan` | OS3.0.314.0.WOACNXM（Android 16） |
-| 🚧 小米 17 | `pudding` | OS4.0.4.0.XPCCNXM（Android 17） |
-| 🚧 小米 17 Pro | `pandora` | OS4.0.4.0.XBLCNXM（Android 17） |
-| 🚧 小米 17 Pro Max | `popsicle` | OS4.0.4.0.XPBCNXM（Android 17） |
-| 🚧 小米 17 Max | `byron` | OS3.0.310.0.WAFCNXM（Android 16） |
-| 🚧 REDMI K80 | `zorn` | OS3.0.309.0.WOKCNXM（Android 16） |
-| 🚧 REDMI K80 Pro | `miro` | OS3.0.305.0.WOMCNXM（Android 16） |
-| 🚧 REDMI K90 | `annibale` | OS3.0.307.0.WPKCNXM（Android 16） |
-| 🚧 REDMI K90 Pro Max | `myron` | OS4.0.4.0.XPMCNXM（Android 17） |
-| 🚧 REDMI K90 Ultra | `warsaw` | OS3.0.309.0.WHPCNXM（Android 16） |
-| 🚧 REDMI K100 Pro | `athens` | OS4.0.4.0.XPICNXM（Android 17） |
-| 🚧 REDMI K100 Pro Max | `songyuan` | OS4.0.4.0.XGNCNXM（Android 17） |
+这个分支只维护这一台机器。合上手机后点亮的外屏、外屏触摸，以及 bixi 的其他改动都在
+[`bixi-cover-display`](https://github.com/XQAB/skyward/tree/bixi-cover-display)
+分支上，镜像在 [Releases](https://github.com/XQAB/skyward/releases)。
 
 ## 安装 Skyward
 
-Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/kirklin/skyward/releases) 下载对应机型的 zip，每个文件都标有机型和代号，例如 Xiaomi 17 Ultra (nezha)。使用 `SHA256SUMS` 核对并解压之后，在手机处于 fastboot 模式的时候，把其中的镜像刷入当前运行槽位的 recovery 分区：
+Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——`0.30.00` 是最后一个只有内屏的版本，`0.38.00` 加上了外屏（合盖屏）——对照发行说明里的 MD5 校验，然后写入当前运行槽位的 recovery 分区：
 
 ```sh
-unzip skyward-v0.2.0-nezha-OS4.0.4.0.XPACNXM.zip
-fastboot flash recovery skyward-v0.2.0-nezha-OS4.0.4.0.XPACNXM.img
-fastboot reboot recovery
+dd if=skyward-bixi.img of=/dev/block/by-name/recovery_a bs=1048576
 ```
+
+这台机器用 `fastboot flash recovery` 刷 100MB 的镜像会在中途断链（`Write to device failed (no link)`），所以从 root shell 写——在 Skyward 里，或者通过 `adb`——才是可靠的方式。
 
 之后连接 WLAN，就可以在“设置”的“Skyward 更新”页面更新到最新版本，也可以在 Skyward 自己的“安装”页面安装解压出来的新版镜像。打开 **自动重新刷入 Skyward** 之后，系统更新或者刷机包覆盖 recovery 分区的时候，Skyward 会重新刷回这些分区。
 
