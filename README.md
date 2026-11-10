@@ -197,21 +197,22 @@ package on Xiaomi's server, reading only the part of the package the partition i
 in, and checks its SHA-256 against the device file:
 
 ```sh
-target/release/skyward-pack stock --config devices/nezha.toml --out target/stock/nezha/recovery.img
+target/release/skyward-pack stock --config devices/bixi.toml --out target/stock/bixi/recovery.img
 ```
 
 Then it builds the image on top of it:
 
 ```sh
 target/release/skyward-pack recovery \
-  --stock target/stock/nezha/recovery.img \
+  --stock target/stock/bixi/recovery.img \
   --binary target/aarch64-linux-android/release/skyward \
   --system-init target/system-init/aarch64-linux-android/release/system-init \
-  --config devices/nezha.toml \
+  --config devices/bixi.toml \
   --font resources/fonts/MiSansVF.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --out target/skyward-nezha.img
+  --extra ../bixi_extra \
+  --out target/skyward-bixi.img
 ```
 
 Tests and lints run on the computer; what runs only on the phone is linted for it:
