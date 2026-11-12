@@ -1,0 +1,6 @@
+# The vendor files under <codename>_extra/ are packed into the image byte for
+# byte. Keep the scripts and fragments at the line endings the phone's shell
+# and init read (LF) even when the checkout is on Windows.
+bixi_extra/**/*.sh text eol=lf
+bixi_extra/**/*.rc text eol=lf
+bixi_extra/**/*.xml text eol=lf

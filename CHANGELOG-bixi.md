@@ -16,8 +16,9 @@
 | About 页出包基线对比 | ⏳ 留真机验收 | 本版没有动 UI：改之前要先在真机上确认 system 的挂载路径，留为下一版第一项 |
 | 文档 | ✅ | `docs/bixi-porting.md`（bixi 移植记录的单一真相源）、`bixi_extra/SOURCES.md`（8 个 extra 文件的出处与用途） |
 
-`1.0.1` 的资产：`skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
+`1.0.1` 的资产：`skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
 同名 `.zip`（自更新可直接吃）、`SHA256SUMS`（两个资产的 sha256）、`verify-report.txt`（本版镜像的自检报告）。
+资产名末段是 `[stock].version`（出包基线包），不是现役系统版本——这次的镜像是 `OS4.0.0.11.XOHCNXM` 基线出的。
 
 ## 1.0.0：这是第一个可以日常用的版本
 

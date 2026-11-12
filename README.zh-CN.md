@@ -96,10 +96,10 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ## 安装 Skyward
 
-Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——最新的是 `skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`，`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照 `SHA256SUMS` 里的 SHA-256 校验（`sha256sum skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`），然后写入当前运行槽位的 recovery 分区：
+Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——最新的是 `skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img`，`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照 `SHA256SUMS` 里的 SHA-256 校验（`sha256sum skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img`），然后写入当前运行槽位的 recovery 分区：
 
 ```sh
-dd if=skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
+dd if=skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
 ```
 
 这台机器用 `fastboot flash recovery` 刷 100MB 的镜像会在中途断链（`Write to device failed (no link)`），所以从 root shell 写——在 Skyward 里，或者通过 `adb`——才是可靠的方式。
