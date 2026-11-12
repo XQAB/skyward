@@ -89,21 +89,21 @@ read and set properties.
 
 | Device | Codename | Tested system version |
 | --- | --- | --- |
-| Xiaomi MIX Flip 2 | `bixi` | OS4.0.0.11.XOHCNXM (Android 16) |
+| Xiaomi MIX Flip 2 | `bixi` | OS4.0.11.XOHCNXM (Android 17) |
 
 This fork keeps Skyward for that phone only. The work on it — the cover screen that
 comes on when the phone is shut, its touch, and the rest of the bixi changes — is in
-the [`bixi-cover-display`](https://github.com/XQAB/skyward/tree/bixi-cover-display)
+the [`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)
 branch, and the images are on
 [Releases](https://github.com/XQAB/skyward/releases).
 
 ## Installing Skyward
 
 Skyward needs an unlocked bootloader. Download the image for this phone from
-[Releases](https://github.com/XQAB/skyward/releases) — `0.30.00` is the last
-screen-only build, `0.38.00` adds the cover screen — check its MD5 against the
-release notes, and write it to the recovery partition of the slot the phone runs
-from:
+[Releases](https://github.com/XQAB/skyward/releases) — `0.32.00` is the first version
+with the cover panel, and `0.37.00` is the first one whose cover touch was accepted on
+the phone — check it against the MD5 in the release notes, and write it to the recovery
+partition of the slot the phone runs from:
 
 ```sh
 dd if=skyward-bixi.img of=/dev/block/by-name/recovery_a bs=1048576

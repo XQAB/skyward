@@ -85,15 +85,15 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 | 机型 | 代号 | 测试的系统版本 |
 | --- | --- | --- |
-| 小米 MIX Flip 2 | `bixi` | OS4.0.0.11.XOHCNXM（Android 16） |
+| 小米 MIX Flip 2 | `bixi` | OS4.0.11.XOHCNXM（Android 17） |
 
 这个分支只维护这一台机器。合上手机后点亮的外屏、外屏触摸，以及 bixi 的其他改动都在
-[`bixi-cover-display`](https://github.com/XQAB/skyward/tree/bixi-cover-display)
+[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)
 分支上，镜像在 [Releases](https://github.com/XQAB/skyward/releases)。
 
 ## 安装 Skyward
 
-Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——`0.30.00` 是最后一个只有内屏的版本，`0.38.00` 加上了外屏（合盖屏）——对照发行说明里的 MD5 校验，然后写入当前运行槽位的 recovery 分区：
+Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照发行说明里的 MD5 校验，然后写入当前运行槽位的 recovery 分区：
 
 ```sh
 dd if=skyward-bixi.img of=/dev/block/by-name/recovery_a bs=1048576
