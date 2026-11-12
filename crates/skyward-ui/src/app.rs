@@ -8783,6 +8783,21 @@ mod tests {
         assert!(!app.state.file_transfer, "the switch shows how it stands");
     }
 
+    #[test]
+    fn the_file_transfer_page_says_the_partition_has_to_be_opened_first() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let opens = |app: &mut App| app.frame(&f, &i).hits.iter().filter(|h| h.action == Action::Open(Screen::Decrypt)).count();
+        assert!(app.state.file_transfer && !matches!(app.state.data, Data::Open), "on, with the partition still shut");
+        let on_locked = opens(&mut app);
+        app.state.file_transfer = false;
+        let off = opens(&mut app);
+        assert_eq!(on_locked, off + 1, "the page says why a computer finds nothing, and offers the way to open it");
+        app.state.file_transfer = true;
+        app.state.data = Data::Open;
+        assert_eq!(opens(&mut app), off, "once the partition is open there is nothing left to warn about");
+    }
+
     /// Flick the page up from `start`: the finger travels `step` px every
     /// 8 ms five times and lifts 8 ms after its last move. Returns when it
     /// lifted.

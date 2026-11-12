@@ -401,13 +401,33 @@ pub fn settings(cx: &Ctx) -> Frame {
     ]);
     out.extend(hits(&general.rows, &[Action::Open(Screen::Language), Action::Open(Screen::TimeZone)]));
     y = widgets::section(&mut c, t, f, general.bottom, "USB");
-    let usb = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(["文件传输", "檔案傳輸", "File transfer"])).icon(BLUE, Icon::Usb).trail(Trail::Switch(s.file_transfer))]);
-    out.extend(hits(&usb.rows, &[Action::Toggle(Switch::FileTransfer)]));
-    let note = l.pick([
-        "开启后，可在电脑上管理内部存储中的文件，需先完成「解密」。",
-        "開啟後，可在電腦上管理內部儲存空間中的檔案，需先完成「解密」。",
-        "When on, a computer can manage the files in internal storage, once it is decrypted.",
-    ]);
+    let transfer = Row::new(l.pick(["文件传输", "檔案傳輸", "File transfer"]))
+        .icon(BLUE, Icon::Usb)
+        .trail(Trail::Switch(s.file_transfer));
+    let mut rows = vec![transfer];
+    let mut actions = vec![Action::Toggle(Switch::FileTransfer)];
+    // A computer finds nothing in internal storage while the data partition
+    // is still locked, and says nothing about why. The page says it, and
+    // offers the way to the page that opens the partition.
+    if s.file_transfer && !matches!(s.data, Data::Open) {
+        rows.push(
+            Row::new(l.pick(["电脑上看不到文件：data 还没解锁", "電腦上看不到檔案：data 還沒解鎖", "No files on the computer: data is locked"]))
+                .subtitle(l.pick([
+                    "先完成「解密」，再插上数据线；在这之前，电脑上的存储是空的。",
+                    "先完成「解密」，再插上傳輸線；在這之前，電腦上的儲存空間是空的。",
+                    "Decrypt first, then plug in the cable; until then a computer sees empty storage.",
+                ]))
+                .icon(ORANGE, Icon::Lock),
+        );
+        actions.push(Action::Open(Screen::Decrypt));
+    }
+    let usb = widgets::list(&mut c, t, f, y, &rows);
+    out.extend(hits(&usb.rows, &actions));
+    let note = l.pick(match (s.file_transfer, matches!(s.data, Data::Open)) {
+        (true, true) => ["已开启，可在电脑上管理内部存储中的文件。", "已開啟，可在電腦上管理內部儲存空間中的檔案。", "On: a computer can manage the files in internal storage."],
+        (true, false) => ["已开启，但 data 还没解锁，电脑上看不到任何文件。", "已開啟，但 data 還沒解鎖，電腦上看不到任何檔案。", "On, but data is locked: a computer sees no files."],
+        (false, _) => ["开启后，可在电脑上管理内部存储中的文件，需先完成「解密」。", "開啟後，可在電腦上管理內部儲存空間中的檔案，需先完成「解密」。", "When on, a computer can manage the files in internal storage, once it is decrypted."],
+    });
     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
     y = widgets::section(&mut c, t, f, y, l.pick(["解密", "解密", "Decryption"]));
     let kept = l.pick(if s.credential_kept { CREDENTIAL_KEPT } else { CREDENTIAL_NONE });
