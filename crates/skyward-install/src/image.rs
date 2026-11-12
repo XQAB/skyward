@@ -5,11 +5,12 @@
 use abootimg_oxide::binrw::io::Cursor;
 use abootimg_oxide::binrw::BinRead;
 use abootimg_oxide::{Header, VendorHeader};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use skyward_vab::Slot;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 const BOOT_MAGIC: &[u8] = b"ANDROID!";
@@ -195,6 +196,54 @@ pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<&'static str>> {
     Ok(found)
 }
 
+/// Whether the block device behind `file` carries the read-only flag; false
+/// for anything that is not a block device.
+fn read_only(file: &File) -> bool {
+    let mut flag: libc::c_int = 0;
+    // SAFETY: the handle is open, and BLKROGET (`0x125e`, as `<linux/fs.h>`
+    // numbers it) writes one int through the pointer it is given. The number
+    // is written out rather than kept as a constant because the two targets
+    // this builds for take the request as different types.
+    let asked = unsafe { libc::ioctl(file.as_raw_fd(), 0x125e, &mut flag) };
+    asked == 0 && flag != 0
+}
+
+/// Clear the read-only flag the block device behind `file` carries, as
+/// fastboot does before writing a partition. An install that has just
+/// finished leaves the partitions it wrote refusing writes until this is
+/// done, which is why writing them back fails with `EPERM` otherwise.
+/// `Ok(true)` when the flag was there and is now gone, `Ok(false)` for a
+/// partition that was writable already or is not a block device at all, and
+/// `Err` when the phone refuses to clear it.
+pub fn make_writable(file: &File) -> io::Result<bool> {
+    if !read_only(file) {
+        return Ok(false);
+    }
+    let clear: libc::c_int = 0;
+    // SAFETY: as in `read_only`, with BLKROSET (`0x125d`) reading the int it is
+    // given: zero clears the flag.
+    if unsafe { libc::ioctl(file.as_raw_fd(), 0x125d, &clear) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(!read_only(file))
+}
+
+/// What a refused write to `path` comes down to, naming the read-only flag
+/// when that is what refused it: `cleared` says whether it was there and was
+/// cleared just before.
+fn refused(path: &Path, cleared: bool, e: io::Error) -> anyhow::Error {
+    match (e.raw_os_error(), cleared) {
+        (Some(libc::EPERM), false) => anyhow!(
+            "write {}: the partition is read-only, as one an update has just written is left",
+            path.display()
+        ),
+        (Some(libc::EPERM), true) => {
+            anyhow!("write {}: the partition was made writable and still refused the write", path.display())
+        }
+        _ => anyhow!("write {}: {e}", path.display()),
+    }
+}
+
 /// Write `len` bytes of `image` to all of `devices` in one pass, then read
 /// each back and compare. A signed image smaller than its partition gets
 /// its footer moved to the partition's end, with zeros between, as
@@ -205,12 +254,13 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
     let mut outs = Vec::with_capacity(devices.len());
     for path in devices {
         let mut f = OpenOptions::new().read(true).write(true).open(path).with_context(|| format!("open {}", path.display()))?;
+        let cleared = make_writable(&f).unwrap_or(false);
         let size = f.seek(SeekFrom::End(0)).with_context(|| format!("find the size of {}", path.display()))?;
         f.seek(SeekFrom::Start(0)).with_context(|| format!("rewind {}", path.display()))?;
-        outs.push((path, f, size));
+        outs.push((path, f, size, cleared));
     }
     let size = outs[0].2;
-    ensure!(outs.iter().all(|(_, _, s)| *s == size), "the partition differs in size between slots");
+    ensure!(outs.iter().all(|(_, _, s, _)| *s == size), "the partition differs in size between slots");
     ensure!(len <= size, "the image is {len} bytes, more than the {size} its partition holds");
 
     let mut footer = [0u8; FOOTER_LEN as usize];
@@ -233,19 +283,19 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
         let n = (end - at).min(CHUNK as u64) as usize;
         source.read_exact(&mut buf[..n]).context("read the image")?;
         written.update(&buf[..n]);
-        for (path, f, _) in &mut outs {
-            f.write_all(&buf[..n]).with_context(|| format!("write {}", path.display()))?;
+        for (path, f, _, cleared) in &mut outs {
+            f.write_all(&buf[..n]).map_err(|e| refused(*path, *cleared, e))?;
             done += n as u64;
             progress(done, total);
         }
         at += n as u64;
     }
     let written = written.finalize();
-    for (path, f, _) in &mut outs {
+    for (path, f, _, _) in &mut outs {
         f.sync_all().with_context(|| format!("flush {}", path.display()))?;
         drop_cache(f).with_context(|| format!("drop the cached pages of {}", path.display()))?;
     }
-    for (path, f, _) in &mut outs {
+    for (path, f, _, _) in &mut outs {
         f.seek(SeekFrom::Start(0)).with_context(|| format!("rewind {}", path.display()))?;
         let mut back = Sha256::new();
         let mut left = end;

@@ -111,14 +111,14 @@ comes on when the phone is shut, its touch, and the rest of the bixi changes —
 
 Skyward needs an unlocked bootloader. Download the image for this phone from
 [Releases](https://github.com/XQAB/skyward/releases) — the newest one is
-`skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img`, and `0.32.00` was the first version
+`skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img`, and `0.32.00` was the first version
 with the cover panel, `0.37.00` the first one whose cover touch was accepted on
 the phone — check it against the SHA-256 in `SHA256SUMS`
-(`sha256sum skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img`), and write it to the recovery
+(`sha256sum skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img`), and write it to the recovery
 partition of the slot the phone runs from:
 
 ```sh
-dd if=skyward-v1.0.1-bixi-OS4.0.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
+dd if=skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
 ```
 
 `fastboot flash recovery` on this phone drops the link partway through a 100MB
@@ -127,8 +127,12 @@ Skyward itself, or over `adb` — is the way that holds.
 
 Afterwards Skyward updates itself over Wi-Fi from its newest release, on the
 Skyward update page in Settings; a newer image, unzipped, also installs from its own
-Install page. With **Flash Skyward again** on, a system update or zip that writes
-over the recovery partitions gets Skyward back in them.
+Install page. With **Flash Skyward again** on, an update or flashable zip installed
+here in Skyward that writes over the recovery partitions gets Skyward back in them.
+A fastboot flash or the phone's own system updater is not covered, as it runs
+without Skyward. The partitions an install has just written are left read-only, so
+Skyward clears that flag before every write — 1.0.2 does; 1.0.1 failed with
+`Operation not permitted` instead.
 
 adb in Skyward is a root shell that needs no authorization on the phone: anyone
 with the phone and a cable can reach its storage while it is in recovery.

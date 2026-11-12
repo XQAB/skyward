@@ -9,8 +9,14 @@ use skyward_vab::Slot;
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 const PARTITION: &str = "recovery";
+
+/// How long to wait before writing a partition a second time, for the
+/// partition an install has just written and left read-only to let go.
+const RETRY_AFTER: Duration = Duration::from_millis(800);
 
 /// What a slot's recovery partition holds: a digest of all of it, and
 /// whether that is Skyward, any build of it.
@@ -54,10 +60,21 @@ impl Kept {
     }
 
     /// Write this recovery into the recovery partitions of `slots` and read
-    /// each back; `progress` hears the bytes so far, of all.
+    /// each back; `progress` hears the bytes so far, of all. A write that
+    /// fails is tried once more after a moment, as the partitions an install
+    /// has just written can refuse the first one.
     pub fn write(&self, slots: &[Slot], progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
         let devices: Vec<PathBuf> = slots.iter().map(|&slot| image::device(&self.dir, PARTITION, slot)).collect();
-        image::flash(&mut Cursor::new(&self.image), self.image.len() as u64, &devices, progress)
+        let mut image = Cursor::new(&self.image);
+        match image::flash(&mut image, self.image.len() as u64, &devices, progress) {
+            Ok(()) => Ok(()),
+            Err(first) => {
+                thread::sleep(RETRY_AFTER);
+                let mut again = Cursor::new(&self.image);
+                image::flash(&mut again, self.image.len() as u64, &devices, progress)
+                    .with_context(|| format!("writing the recovery partitions failed twice; the first attempt: {first:#}"))
+            }
+        }
     }
 }
 

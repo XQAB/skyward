@@ -1,7 +1,23 @@
-# Skyward for bixi · 1.0.1
+# Skyward for bixi · 1.0.2
 
 > 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
+
+## 1.0.2
+
+1.0.1 发出去后第一次拿官方整包做真机验收，暴露出两件事：装完 Skyward 写回 recovery 分区当场失败，以及装完的槽位起不来。这版修前者、把安装进度做成看得见的，后者只留诊断。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| 写回 recovery 分区失败 | ✅ 修（待真机复验） | 真机实测：装完 `blockdev --getro recovery_b` = **1**，`sha256` 是原厂值；现场 `blockdev --setrw` 后 `dd` 一次写成。根因是 `update_engine` 收尾后目标分区带只读旗标，而 `image::flash()` 只 `open(read+write)` 直写，内核回 `EPERM (os error 1)`。现在写前对每个目标分区 `BLKROSET(0)`（等价 `blockdev --setrw`），非 block 设备忽略；写失败时错误文案直接说「分区只读」，不再只有 `Operation not permitted` |
+| 写回重试 | ✅ | 清只读后仍失败时等 0.8 s 再写一次（重试会重新清一遍只读），两次都失败才把首次原因一并报出 |
+| 安装进度看得见 | ✅ | 屏幕本来就有「第 1/2/3 步，共 3 步 + 百分比」，但百分比只靠 fuse 已送出的字节推算；现在同时解析 `update_engine` 的 `progress <frac> <seconds>` 状态行，优先用引擎自报的比例，进度条按它走 |
+| 装完后的状态留痕 | ✅ | 安装成功后在 kmsg 记一行 `install: left for the next start: snapshots …`（`/metadata/ota` 的快照状态 + 是否欠一次 merge），供「新槽起不来」排查 |
+| 整包装完后新槽起不来 | ❌ 本版不修 | 真机实测：同支 `4.0.0.11` 与 `4.0.3.0` 两个整包装进 B 槽后，重启都停在 logo 循环；两槽的 `boot`/`vendor_boot`/`vbmeta`/`dtbo` 的 sha256 前 16 位完全相同，写错已排除。回旧槽启动后 `/metadata/ota/state` 被清成 0 字节、`snapshots/` 清空（`vendor.snapshot_clear`，退出 0），VABC 快照失效，目标槽从此不可启。根因未定，详见 [issue #4](https://github.com/XQAB/skyward/issues/4) |
+| About 页出包基线对比 | ⏳ 留真机验收 | 与 1.0.1 相同，仍待真机确认 system 的挂载路径 |
+
+`1.0.2` 的资产：`skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
+同名 `.zip`（自更新可直接吃）、`SHA256SUMS`、`verify-report.txt`。
 
 ## 1.0.1
 

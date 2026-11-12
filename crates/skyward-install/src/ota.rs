@@ -23,11 +23,20 @@ pub enum Status {
     /// Step 1 writes the partitions; step 2 runs the package's last steps,
     /// after the written partitions are read back.
     Step(u32),
+    /// How far it has got, in thousandths of the package written, and the
+    /// seconds it still expects to take.
+    Progress { thousandths: u16, seconds: u32 },
     /// It failed with this error code.
     Error(i32),
 }
 
 pub fn status(line: &str) -> Option<Status> {
+    if let Some(text) = line.strip_prefix("progress ") {
+        let (share, left) = text.split_once(' ')?;
+        let share: f64 = share.parse().ok()?;
+        let seconds: u32 = left.split_whitespace().next()?.parse().ok()?;
+        return Some(Status::Progress { thousandths: (share.clamp(0.0, 1.0) * 1000.0).round() as u16, seconds });
+    }
     let text = line.strip_prefix("ui_print ")?;
     if let Some(step) = text.strip_prefix("Step ") {
         return step.split_once('/')?.0.parse().ok().map(Status::Step);
@@ -132,15 +141,18 @@ mod tests {
     }
 
     #[test]
-    fn status_lines_give_steps_and_errors() {
+    fn status_lines_give_steps_progress_and_errors() {
         assert_eq!(status("ui_print Step 1/2"), Some(Status::Step(1)));
         assert_eq!(status("ui_print Step 2/2"), Some(Status::Step(2)));
+        assert_eq!(status("progress 0.25 300"), Some(Status::Progress { thousandths: 250, seconds: 300 }));
+        assert_eq!(status("progress 1.0 0"), Some(Status::Progress { thousandths: 1000, seconds: 0 }));
+        assert_eq!(status("progress 1.7 0"), Some(Status::Progress { thousandths: 1000, seconds: 0 }), "never more than all of it");
         assert_eq!(
             status("ui_print Error applying update: 51 (ErrorCode::kPayloadTimestampError)"),
             Some(Status::Error(51))
         );
-        assert_eq!(status("progress 0.5 0"), None);
         assert_eq!(status("set_progress 1"), None);
+        assert_eq!(status("progress nonsense"), None);
     }
 
     #[test]

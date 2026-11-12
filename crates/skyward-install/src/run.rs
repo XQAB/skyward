@@ -617,6 +617,9 @@ fn update_system<S>(ctx: &mut Context, mount: &Mount<S>, update: &Update) -> Res
     if let Err(e) = remount_metadata() {
         let _ = kmsg(&format!("install: /metadata not mounted again: {e:#}"));
     }
+    if code.is_ok() {
+        what_is_left();
+    }
     Ok(match code? {
         0 => {
             if let Some(kept) = &kept {
@@ -626,6 +629,22 @@ fn update_system<S>(ctx: &mut Context, mount: &Mount<S>, update: &Update) -> Res
         }
         code => Done::Engine(code),
     })
+}
+
+/// What an install left for the next start, in the kernel log: the snapshot
+/// state /metadata holds and whether a merge is owed. A slot that does not
+/// start after an update is told apart from a package written wrong through
+/// what is here, so it is written down while it is still true.
+fn what_is_left() {
+    let state = match skyward_vab::snapshot_state() {
+        Ok(state) => format!("{state:?}"),
+        Err(e) => format!("unknown ({e:#})"),
+    };
+    let merge = match skyward_vab::merge_outstanding() {
+        Ok(owed) => owed.to_string(),
+        Err(e) => format!("unknown ({e:#})"),
+    };
+    let _ = kmsg(&format!("install: left for the next start: snapshots {state}, merge outstanding {merge}"));
 }
 
 /// This recovery, held before an install writes, when the screen asked to
@@ -750,9 +769,14 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
     ctx.send(Event::Progress(stage.clone()));
     let mut told = Instant::now();
     let (mut partitions, mut verifying, mut finishing, mut error) = (0, None, false, None);
+    // How far update_engine says it has got, in thousandths, which is what
+    // the screen shows a share of the package written by; the bytes the
+    // filesystem served say the same before it says anything.
+    let mut engine: Option<u16> = None;
     loop {
         match rx.recv_timeout(PROGRESS_EVERY) {
             Ok(Line::Status(Status::Step(step))) => finishing = step == 2,
+            Ok(Line::Status(Status::Progress { thousandths, .. })) => engine = Some(thousandths),
             Ok(Line::Status(Status::Error(code))) => error = Some(code),
             Ok(Line::Log(Log::Partition(_))) => partitions += 1,
             Ok(Line::Log(Log::Overwriting)) => ctx.send(Event::Overwriting),
@@ -766,7 +790,11 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
         } else if let Some((index, partition)) = &verifying {
             Stage::Verifying { index: *index, count: partitions.max(index + 1), partition: partition.clone() }
         } else {
-            Stage::Writing { done: mount.served().saturating_sub(update.payload_offset).min(total), total }
+            let done = match engine {
+                Some(thousandths) => total / 1000 * u64::from(thousandths),
+                None => mount.served().saturating_sub(update.payload_offset).min(total),
+            };
+            Stage::Writing { done, total }
         };
         let moved_on = std::mem::discriminant(&now) != std::mem::discriminant(&stage);
         if now != stage && (moved_on || told.elapsed() >= PROGRESS_EVERY) {
