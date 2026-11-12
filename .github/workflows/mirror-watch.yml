@@ -1,0 +1,50 @@
+name: Mirror watch
+
+# The update page hands its downloads to one of five mirrors. A mirror that
+# quietly stops answering looks on the phone exactly like a bad network, and
+# nobody finds out until someone tries to update over it. So once a day,
+# tools/mirror-watch.py asks each one the same two questions — does it still
+# carry GitHub's API, does it still hand out the newest asset — and an issue
+# is opened when one goes away.
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Ask each mirror
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ask each mirror whether it still answers
+        run: python3 tools/mirror-watch.py --report "$RUNNER_TEMP/mirror-report.md"
+
+      - name: Say which ones stopped
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ runner.temp }}/mirror-report.md
+        run: |
+          set -eu
+          gh label create mirror-watch --description "加速源探活" --color B60205 2>/dev/null || true
+          body=$(cat "$REPORT")
+          open=$(gh issue list --label mirror-watch --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+          else
+            gh issue create --title "镜像站探活：有镜像停了 $(date -u +%F)" --body "$body" --label mirror-watch
+          fi
+
+      - name: Keep the table
+        if: always()
+        run: cat "$RUNNER_TEMP/mirror-report.md" >> "$GITHUB_STEP_SUMMARY" || true
