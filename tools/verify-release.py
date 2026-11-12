@@ -277,6 +277,18 @@ def version_of(manifest):
     return match.group(1) if match else None
 
 
+def same_build(prop, stock):
+    """Whether a property names the stock build the device file does.
+
+    A package's version carries the channel it was made for at its end — ``XM``
+    for China — and the stock recovery's prop.default leaves that off.
+    """
+    if prop == stock:
+        return True
+    rest = stock[len(prop) :]
+    return len(rest) == 2 and stock.startswith(prop) and rest.isalpha()
+
+
 def verify(image, config, extra, version, manifest):
     report = Report()
     device = Path(config).stem
@@ -449,13 +461,14 @@ def verify(image, config, extra, version, manifest):
             named = {n: props[n] for n in names if n in props}
             if stock is None:
                 report.warn("prop.default build", "the configuration names no [stock].version to compare with")
-            elif not named:
-                report.warn("prop.default build", f"none of {', '.join(names)} is set")
-            elif stock in named.values():
-                name = next(n for n, v in named.items() if v == stock)
-                report.ok("prop.default build", f"{name}={stock}, as [stock].version says")
+            elif named:
+                match = next((n for n, v in named.items() if same_build(v, stock)), None)
+                if match:
+                    report.ok("prop.default build", f"{match}={named[match]}, the stock build [stock].version names")
+                else:
+                    report.fail("prop.default build", f"{named} where [stock].version is {stock}")
             else:
-                report.fail("prop.default build", f"{named} where [stock].version is {stock}")
+                report.warn("prop.default build", f"none of {', '.join(names)} is set")
             for line in SET_PROPS:
                 name, value = line.split("=", 1)
                 if props.get(name) == value:

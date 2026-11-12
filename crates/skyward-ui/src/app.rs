@@ -7889,6 +7889,28 @@ mod tests {
         (x, y - scroll)
     }
 
+    /// Whether any control on the page does `action` — visible, pinned, docked,
+    /// or a row of its long list.
+    fn has(app: &mut App, f: &Fonts, i: &DeviceInfo, action: Action) -> bool {
+        let fr = app.frame(f, i);
+        if fr.hits.iter().any(|h| h.action == action) {
+            return true;
+        }
+        if fr.pinned.as_ref().is_some_and(|p| p.hits.iter().any(|h| h.action == action)) {
+            return true;
+        }
+        if fr.dock.as_ref().is_some_and(|d| d.hits.iter().any(|h| h.action == action)) {
+            return true;
+        }
+        let Some(rows) = fr.rows.as_ref() else {
+            return false;
+        };
+        let Some(answer) = rows.action else {
+            return false;
+        };
+        (0..rows.count()).any(|k| answer(k) == action)
+    }
+
     fn tap(app: &mut App, f: &Fonts, i: &DeviceInfo, action: Action) -> Vec<Effect> {
         tap_at(app, f, i, action, 0)
     }
@@ -8787,15 +8809,13 @@ mod tests {
     fn the_file_transfer_page_says_the_partition_has_to_be_opened_first() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Settings, W, H, PPD);
-        let opens = |app: &mut App| app.frame(&f, &i).hits.iter().filter(|h| h.action == Action::Open(Screen::Decrypt)).count();
         assert!(app.state.file_transfer && !matches!(app.state.data, Data::Open), "on, with the partition still shut");
-        let on_locked = opens(&mut app);
+        assert!(has(&mut app, &f, &i, Action::Open(Screen::Decrypt)), "the page says why a computer finds nothing, and offers the way to open it");
         app.state.file_transfer = false;
-        let off = opens(&mut app);
-        assert_eq!(on_locked, off + 1, "the page says why a computer finds nothing, and offers the way to open it");
+        assert!(!has(&mut app, &f, &i, Action::Open(Screen::Decrypt)), "off, it says what turning it on would do instead");
         app.state.file_transfer = true;
         app.state.data = Data::Open;
-        assert_eq!(opens(&mut app), off, "once the partition is open there is nothing left to warn about");
+        assert!(!has(&mut app, &f, &i, Action::Open(Screen::Decrypt)), "once the partition is open there is nothing left to warn about");
     }
 
     /// Flick the page up from `start`: the finger travels `step` px every
@@ -9032,6 +9052,16 @@ mod tests {
         scroll_to(&mut app, &f, end, 0);
         app.tick(2000);
         assert_eq!((app.title.level(2000), app.bar.level(2000)), (1.0, 1.0), "scrolled down, the bar is up");
+        // The language row sits above where the page comes to rest, so the page
+        // is taken back up until it is on screen — still far down, so the bar
+        // stays up.
+        let (_, y) = spot(&mut app, &f, &i, Action::Open(Screen::Language));
+        let at = (app.top().1 + y - H as f32 * 0.4).clamp(0.0, end);
+        if (at - app.top().1).abs() > 0.01 {
+            scroll_to(&mut app, &f, at, 2000);
+        }
+        let at = app.top().1;
+        assert!(at > 0.0, "the page is still scrolled");
         tap_at(&mut app, &f, &i, Action::Open(Screen::Language), 3000);
         assert_eq!(app.screen(), Screen::Language);
         tap_back(&mut app, &f, &i, 4000);
@@ -9039,7 +9069,7 @@ mod tests {
         let mut c = Canvas::new(W, H);
         app.tick(4008);
         app.compose(&mut c, &f, &i, "12:00", 4008);
-        assert_eq!(app.top().1, end, "the page is where it was left");
+        assert_eq!(app.top().1, at, "the page is where it was left");
         assert_eq!((app.title.level(4008), app.bar.level(4008)), (1.0, 1.0), "its bar is up from the first frame");
     }
 
