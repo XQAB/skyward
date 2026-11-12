@@ -8812,9 +8812,11 @@ mod tests {
         assert!(app.state.file_transfer && !matches!(app.state.data, Data::Open), "on, with the partition still shut");
         assert!(has(&mut app, &f, &i, Action::Open(Screen::Decrypt)), "the page says why a computer finds nothing, and offers the way to open it");
         app.state.file_transfer = false;
+        app.refresh();
         assert!(!has(&mut app, &f, &i, Action::Open(Screen::Decrypt)), "off, it says what turning it on would do instead");
         app.state.file_transfer = true;
         app.state.data = Data::Open;
+        app.refresh();
         assert!(!has(&mut app, &f, &i, Action::Open(Screen::Decrypt)), "once the partition is open there is nothing left to warn about");
     }
 

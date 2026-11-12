@@ -289,6 +289,22 @@ def same_build(prop, stock):
     return len(rest) == 2 and stock.startswith(prop) and rest.isalpha()
 
 
+MIUI_VERSION = re.compile(r"^OS(\d+)\.(\d+)\.(\d+)\.(\d+)\.([A-Z0-9]+)CN(?:[A-Z]+)?$")
+
+
+def same_line(prop, stock):
+    """Whether two versions are one device's line: the same OS and channel.
+
+    A stock package can hold a recovery built before the package it ships in —
+    several do — so the property's last number may be older than the package's
+    while still naming the same phone and the same OS.
+    """
+    a, b = MIUI_VERSION.match(prop), MIUI_VERSION.match(stock)
+    if not a or not b:
+        return False
+    return a[1] == b[1] and a[2] == b[2] and a[5] == b[5]
+
+
 def verify(image, config, extra, version, manifest):
     report = Report()
     device = Path(config).stem
@@ -462,9 +478,16 @@ def verify(image, config, extra, version, manifest):
             if stock is None:
                 report.warn("prop.default build", "the configuration names no [stock].version to compare with")
             elif named:
-                match = next((n for n, v in named.items() if same_build(v, stock)), None)
-                if match:
-                    report.ok("prop.default build", f"{match}={named[match]}, the stock build [stock].version names")
+                build = next((n for n, v in named.items() if same_build(v, stock)), None)
+                if build:
+                    report.ok("prop.default build", f"{build}={named[build]}, the stock build [stock].version names")
+                elif any(same_line(v, stock) for v in named.values()):
+                    name, version = next((n, v) for n, v in named.items() if same_line(v, stock))
+                    report.warn(
+                        "prop.default build",
+                        f"{name}={version} on the same line as [stock].version {stock}: the recovery in that "
+                        "package is built before the package, so its own build is the older one",
+                    )
                 else:
                     report.fail("prop.default build", f"{named} where [stock].version is {stock}")
             else:
