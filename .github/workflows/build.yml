@@ -155,10 +155,10 @@ jobs:
       # Skyward's own updater takes first when it asks GitHub for a release.
       - uses: actions/upload-artifact@v7
         with:
+          name: ${{ steps.pack.outputs.name }}
           path: |
             out/${{ steps.pack.outputs.name }}.img
             out/${{ steps.pack.outputs.name }}.zip
-          archive: false
           if-no-files-found: error
           retention-days: 7
 
@@ -179,7 +179,6 @@ jobs:
           pattern: skyward-*
           path: images
           merge-multiple: true
-          skip-decompress: true
       - name: Sum what is handed out
         working-directory: images
         run: sha256sum -- *.img *.zip > SHA256SUMS
