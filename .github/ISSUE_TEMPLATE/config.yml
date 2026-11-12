@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Upstream Skyward
+    url: https://github.com/kirklin/skyward
+    about: Bugs that are not specific to the MIX Flip 2 (bixi) belong upstream.

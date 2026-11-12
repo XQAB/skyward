@@ -102,7 +102,8 @@ branch, and the images are on
 Skyward needs an unlocked bootloader. Download the image for this phone from
 [Releases](https://github.com/XQAB/skyward/releases) — `0.32.00` is the first version
 with the cover panel, and `0.37.00` is the first one whose cover touch was accepted on
-the phone — check it against the MD5 in the release notes, and write it to the recovery
+the phone — check it against the SHA-256 in `SHA256SUMS` (`sha256sum skyward-bixi.img`), and
+write it to the recovery
 partition of the slot the phone runs from:
 
 ```sh
@@ -211,7 +212,11 @@ target/release/skyward-pack recovery \
   --font resources/fonts/MiSansVF.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --extra ../bixi_extra \
+  --extra bixi_extra \
+
+`bixi_extra/` ships with this repository: it holds the secure-element and
+weaver pieces the bixi build layers on top of the stock recovery, so a plain
+clone builds without a second directory next to it.
   --out target/skyward-bixi.img
 ```
 

@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in Skyward for the MIX Flip 2 (bixi) does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in as much as you can. "It does not boot" with nothing else usually cannot be acted on.
+  - type: input
+    id: skyward-version
+    attributes:
+      label: Skyward version
+      description: The image you flashed, e.g. 1.0.0, or the release tag.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System version on the phone
+      description: From Settings -> About phone, e.g. OS4.0.11.XOHCNXM
+      placeholder: OS4.0.11.XOHCNXM
+    validations:
+      required: true
+  - type: dropdown
+    id: panel
+    attributes:
+      label: Which panel
+      options:
+        - inner screen
+        - cover screen
+        - both
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got. Note whether the phone was folded.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        While Skyward is running, `adb pull /tmp/recovery.log` (or attach the file).
+        If it does not boot at all, say what the phone does instead - black panel, reboot loop, stuck on the logo.
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Files you flashed, partitions you changed, whether you are dual booting.

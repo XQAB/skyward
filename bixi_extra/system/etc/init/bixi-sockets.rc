@@ -1,0 +1,21 @@
+# ssgtzd 在手机上是 init 替它建好 /dev/socket/ssgtzd 与 ssgtzd_opener 两个
+# socket；recovery 的 init 不会建，而这两个 socket 是 weaver 把请求送进
+# 安全世界的唯一通道（没有它 weaver 的 GetSlots 会 1 秒超时）。
+# 它自己会 bind，只是 /dev/socket 默认是 root 0755、system 身份写不进去，
+# 这里在开机最早的时候把目录放开。
+on early-init
+    chmod 0777 /dev/socket
+
+# /data 一解开就把 /data/media/0 接到 /sdcard 上：电脑的 MTP 与 recovery 的
+# 文件页读的都是 /sdcard，而 Skyward 只会在密码路径成功后自己接这一步。
+# recovery 的 init 不会自己去起 class 里的服务，照 servicemanager 的写法：
+# 声明成 disabled，再在触发点上显式 start。
+service bixi_sdcard /system/bin/sh /system/bin/bixi-sdcard.sh
+    user root
+    group root
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+on early-init
+    start bixi_sdcard

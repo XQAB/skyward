@@ -93,7 +93,7 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ## 安装 Skyward
 
-Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照发行说明里的 MD5 校验，然后写入当前运行槽位的 recovery 分区：
+Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照 `SHA256SUMS` 里的 SHA-256 校验（`sha256sum skyward-bixi.img`），然后写入当前运行槽位的 recovery 分区：
 
 ```sh
 dd if=skyward-bixi.img of=/dev/block/by-name/recovery_a bs=1048576
@@ -156,7 +156,11 @@ target/release/skyward-pack recovery \
   --font resources/fonts/MiSansVF.ttf \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
-  --extra ../bixi_extra \
+  --extra bixi_extra \
+
+`bixi_extra/` 随仓库一起分发：它装着 bixi 构建在 stock recovery 之上叠的那几样
+安全元件（secure element）与 weaver 的东西，所以单纯 clone 下来就能编，不用在
+旁边再放一个目录。
   --out target/skyward-bixi.img
 ```
 
