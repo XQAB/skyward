@@ -13,7 +13,9 @@ Run by .github/workflows/mirror-watch.yml on a schedule; also usable by hand:
 """
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -63,9 +65,51 @@ def newest_directly():
     return release["tag_name"], build["name"], build["browser_download_url"], build["size"]
 
 
+def gh(path, method="GET", payload=None):
+    """Ask GitHub's own API, with the token the workflow already has."""
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise SystemExit("--file-issue needs GH_TOKEN or GITHUB_TOKEN in the environment")
+    body = json.dumps(payload).encode() if payload is not None else None
+    request = urllib.request.Request(
+        "https://api.github.com" + path, data=body, method=method,
+        headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                 "Content-Type": "application/json", "User-Agent": "skyward-mirror-watch"})
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
+        text = answer.read().decode()
+    return json.loads(text) if text else None
+
+
+def file_issue(report, failed):
+    """Open one issue for this, or add a comment when something new broke."""
+    repo = os.environ.get("GITHUB_REPOSITORY", "XQAB/skyward")
+    fingerprint = hashlib.sha256("\n".join(sorted(failed)).encode()).hexdigest()[:12]
+    marker = f"<!-- mirror-watch: {fingerprint} -->"
+    body = report + "\nWhat broke:\n\n" + "\n".join(f"- {one}" for one in failed) + f"\n\n{marker}\n"
+
+    open_issues = gh(f"/repos/{repo}/issues?labels=mirror-watch&state=open&per_page=10") or []
+    if not open_issues:
+        issue = gh(f"/repos/{repo}/issues", "POST", {
+            "title": f"镜像站探活：{time.strftime('%Y-%m-%d', time.gmtime())} 有镜像停了",
+            "body": body, "labels": ["mirror-watch"]})
+        print(f"opened #{issue['number']}: {issue['html_url']}")
+        return
+
+    issue = open_issues[0]
+    comments = gh(f"/repos/{repo}/issues/{issue['number']}/comments?per_page=100") or []
+    last = comments[0]["body"] if comments else (issue.get("body") or "")
+    if marker in last or f"mirror-watch: {fingerprint}" in last:
+        print(f"#{issue['number']}: the same set is already written down; no comment")
+        return
+    gh(f"/repos/{repo}/issues/{issue['number']}/comments", "POST", {"body": body})
+    print(f"commented on #{issue['number']}: {issue['html_url']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Probe the GitHub mirrors Skyward offers.")
     parser.add_argument("--report", help="write the table here as markdown too")
+    parser.add_argument("--file-issue", action="store_true",
+                        help="open or update the mirror-watch issue when something stopped")
     args = parser.parse_args()
 
     tag, asset, asset_url, size = newest_directly()
@@ -120,6 +164,8 @@ def main():
         print("", file=sys.stderr)
         for one in failed:
             print(one, file=sys.stderr)
+        if args.file_issue:
+            file_issue(report, failed)
         return 1
     return 0
 
