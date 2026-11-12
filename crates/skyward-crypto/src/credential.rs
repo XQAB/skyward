@@ -5,6 +5,16 @@
 //! What this does not protect against is someone holding this phone: they can
 //! run the same code. The key is not in the TEE, because a recovery cannot ask
 //! the secure world to wrap a secret it has never seen.
+//!
+//! TODO: the key is the serial number the phone reports, which is readable and
+//! shared by every phone of the same model line, so the seal is a marking, not
+//! a boundary. The stronger thing this phone can offer is the keybox the
+//! weaver trusted environment already holds: the vendor service that answers
+//! on this phone (see bixi_extra/weaver-nxp.xml) can seal and unseal without
+//! ever handing the key out, and it is there in recovery because this fork
+//! starts it. Moving this file onto that is a change of its own, with the
+//! plaintext credential already stored on phones that ran 1.0.0 to carry
+//! forward - see the issue this line points at.
 
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::aead::rand_core::RngCore;

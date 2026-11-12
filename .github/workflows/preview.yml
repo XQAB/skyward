@@ -1,0 +1,64 @@
+name: Preview
+
+# Every page drawn to a PNG here, on the computer, with the same code the
+# phone runs. A change to how something looks then shows up as an image in
+# the run instead of as a paragraph in a review, and the two panels of a
+# foldable are both in it - the cover screen draws its own pages.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  render:
+    name: Draw every page
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Draw the pages, in both languages
+        run: |
+          cargo run --release -p skyward-preview -- preview-out/zh-CN --lang zh-CN
+          cargo run --release -p skyward-preview -- preview-out/en-US --lang en-US
+      - name: Sum what was drawn
+        run: |
+          cd preview-out
+          find . -name '*.png' -print0 | sort -z | xargs -0 sha256sum > hashes.txt
+          wc -l hashes.txt
+          cat hashes.txt >> "$GITHUB_STEP_SUMMARY"
+      # What a page is meant to look like is the last main it was accepted on.
+      # A difference is reported, page by page; it is not failed on, because
+      # a drawing that moved on purpose is not a regression, and the images
+      # above are what a person looks at to say which it is.
+      - name: Say what changed against the recorded baseline
+        if: hashFiles('preview-baseline/zh-CN/hashes.txt') != ''
+        run: |
+          {
+            echo "### Against the baseline"
+            for lang in zh-CN en-US; do
+              if diff -u "preview-baseline/$lang/hashes.txt" "preview-out/$lang/hashes.txt" > "diff-$lang.txt"; then
+                echo "- $lang: no page changed"
+              else
+                echo "- $lang: pages that changed"
+                grep '^[-+][^-+]' "diff-$lang.txt" | sed 's/^/    /' | head -40 || true
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: preview
+          path: preview-out
+          if-no-files-found: error
+          retention-days: 14

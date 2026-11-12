@@ -1,0 +1,3 @@
+version=OS4.0.0.11.XOHCNXM
+package=https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.0.11.XOHCNXM/bixi-ota_full-OS4.0.0.11.XOHCNXM-user-17.0-a2f3e2774c.zip
+recovery=cad33d37009a7c9a16779571e32dcd9c71de80d921dd7d3ea913c058210f0429

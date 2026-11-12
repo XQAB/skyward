@@ -1,0 +1,101 @@
+name: Stock build watch
+
+# The image is built on top of the phone's own stock recovery, taken out of
+# the full update package Xiaomi publishes. When they publish a new one, the
+# package and the partition in it change, and this build is made on a recovery
+# that is no longer what the phone runs. Nothing breaks at once - the old
+# package stays on their server - but a porting session that starts from the
+# new package will not line up with this image.
+#
+# So once a week: ask each device's configuration what package it names, ask
+# the server whether that package is still the newest for the phone, and open
+# an issue when the answer moved.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  watch:
+    name: Ask the stock build what is there now
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build the packer
+        run: cargo build --release --locked -p skyward-pack
+      - name: Read what each device's configuration names
+        run: |
+          mkdir now
+          for config in devices/*.toml; do
+            device=$(basename "$config" .toml)
+            grep -q '^\[stock\]' "$config" || continue
+            if ! target/release/skyward-pack stock --config "$config" > "now/$device.txt"; then
+              echo "could not read $device" >&2
+              rm -f "now/$device.txt"
+              echo "$device" >> unread.txt
+            fi
+          done
+          cat now/*.txt || true
+      - name: Compare with the one the repository recorded
+        id: moved
+        run: |
+          moved=""
+          for f in now/*.txt; do
+            device=$(basename "$f" .txt)
+            base=".github/stock/$device.txt"
+            if [ ! -f "$base" ]; then
+              echo "no baseline for $device yet"
+              continue
+            fi
+            if ! diff -q "$base" "$f" > /dev/null; then
+              moved="$moved $device"
+            fi
+          done
+          echo "moved=$(echo $moved)" >> "$GITHUB_OUTPUT"
+      - name: Say what moved, here
+        if: steps.moved.outputs.moved != ''
+        run: |
+          {
+            echo "### The stock build moved"
+            for device in ${{ steps.moved.outputs.moved }}; do
+              echo "#### $device"
+              echo '```diff'
+              diff -u ".github/stock/$device.txt" "now/$device.txt" || true
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Open an issue about it
+        if: steps.moved.outputs.moved != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="stock build moved:${{ steps.moved.outputs.moved }}"
+          existing=$(gh issue list --state open --search "in:title ${title}" --json number --jq '.[0].number // empty')
+          body=$( {
+            echo "The full update package these images are built on top of has changed for:${{ steps.moved.outputs.moved }}."
+            echo
+            for device in ${{ steps.moved.outputs.moved }}; do
+              echo "### $device"
+              echo '```diff'
+              diff -u ".github/stock/$device.txt" "now/$device.txt" || true
+              echo '```'
+            done
+            echo
+            echo "Nothing is broken yet: the package named in the configuration is still on the server, so the current image still rebuilds. What this means is that the next porting session should start from the new package - the recovery partition, the vendor blobs and the property names are what a new stock build changes. Until the configuration names the new one, a rebuild produces the old layout."
+            echo
+            echo "To take it: update `[stock]` in `devices/<codename>.toml`, take the recovery partition out of the new package with `skyward-pack stock --out`, and check the build still boots on the phone."
+          } )
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

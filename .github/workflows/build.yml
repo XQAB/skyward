@@ -135,9 +135,14 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
           name="skyward-$version-$DEVICE-$STOCK"
           mkdir out
+          # A phone whose own vendor programs need libraries the stock recovery
+          # does not carry keeps them in <codename>_extra/, laid out as the
+          # recovery's own root; they go into the image along with the binary.
+          extra=()
+          if [ -d "${DEVICE}_extra" ]; then extra=(--extra "${DEVICE}_extra"); fi
           tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --system-init tools/system-init \
             --config "devices/$DEVICE.toml" --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
-            --mono-license resources/fonts/KirkMono-OFL.txt --out "out/$name.img"
+            --mono-license resources/fonts/KirkMono-OFL.txt "${extra[@]}" --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
       # The image is the whole partition, flashed as it is, and most of it
       # is the room the recovery leaves empty; it is handed out zipped.
@@ -146,10 +151,13 @@ jobs:
         env:
           NAME: ${{ steps.pack.outputs.name }}
         run: zip -9 "$NAME.zip" "$NAME.img"
-      # The artifact takes the zip's name.
+      # Both of them: the zip people unzip, and the bare partition image that
+      # Skyward's own updater takes first when it asks GitHub for a release.
       - uses: actions/upload-artifact@v7
         with:
-          path: out/${{ steps.pack.outputs.name }}.zip
+          path: |
+            out/${{ steps.pack.outputs.name }}.img
+            out/${{ steps.pack.outputs.name }}.zip
           archive: false
           if-no-files-found: error
           retention-days: 7
@@ -164,17 +172,17 @@ jobs:
     steps:
       # The devices' configurations say which phone each zip is for.
       - uses: actions/checkout@v7
-      # Each artifact is a zip, which the download keeps whole under its
-      # name, as it is handed out.
+      # Each artifact is the image and its zip, which the download keeps whole
+      # under their names, as they are handed out.
       - uses: actions/download-artifact@v8
         with:
           pattern: skyward-*
           path: images
           merge-multiple: true
           skip-decompress: true
-      - name: Sum the zips
+      - name: Sum what is handed out
         working-directory: images
-        run: sha256sum -- *.zip > SHA256SUMS
+        run: sha256sum -- *.img *.zip > SHA256SUMS
       # Each zip shows on the release as the phone it is for, its model and
       # then its codename, which is how people look for theirs; a device
       # whose zip is missing stops the release.
@@ -183,11 +191,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          zips=()
+          assets=()
           for config in devices/*.toml; do
             device=$(basename "$config" .toml)
             model=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["device"]["model"])' "$config")
+            img=$(ls images/skyward-"$GITHUB_REF_NAME"-"$device"-*.img)
             zip=$(ls images/skyward-"$GITHUB_REF_NAME"-"$device"-*.zip)
-            zips+=("$zip#$model ($device)")
+            assets+=("$img#$model ($device) - image")
+            assets+=("$zip#$model ($device) - zip")
           done
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes "${zips[@]}" images/SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes "${assets[@]}" images/SHA256SUMS

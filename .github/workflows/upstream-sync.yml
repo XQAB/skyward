@@ -1,0 +1,74 @@
+name: Upstream sync
+
+# This fork is Skyward plus one phone, and the upstream tree keeps moving
+# under it: new pages, new services, fixes that are not about this phone at
+# all. Merging it is a session of its own, not something to do on a timer,
+# so this only says when there is something to merge.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Has upstream moved
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: What upstream has now
+        run: |
+          git ls-remote https://github.com/kirklin/skyward.git refs/heads/main | cut -f1 > upstream-now.txt
+          cat upstream-now.txt
+      - name: Compare with the one recorded
+        id: moved
+        run: |
+          recorded=$(cat .github/upstream/main.txt 2>/dev/null || true)
+          now=$(cat upstream-now.txt)
+          if [ "$recorded" = "$now" ]; then
+            echo "moved=" >> "$GITHUB_OUTPUT"
+          else
+            echo "moved=$now" >> "$GITHUB_OUTPUT"
+          fi
+      - name: How far apart they are
+        if: steps.moved.outputs.moved != ''
+        run: |
+          git fetch --depth=50 https://github.com/kirklin/skyward.git "${{ steps.moved.outputs.moved }}"
+          {
+            echo "### Upstream moved"
+            echo "recorded: `$(cat .github/upstream/main.txt)`"
+            echo "now: `${{ steps.moved.outputs.moved }}`"
+            echo
+            echo '```'
+            git log --oneline -15 FETCH_HEAD || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Open an issue about it
+        if: steps.moved.outputs.moved != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="upstream: kirklin/skyward has moved"
+          body=$( {
+            echo "Upstream `kirklin/skyward` main is at `${{ steps.moved.outputs.moved }}`, where this fork recorded `$(cat .github/upstream/main.txt)`."
+            echo
+            echo '```'
+            git log --oneline -15 FETCH_HEAD || true
+            echo '```'
+            echo
+            echo "Merging it is a session of its own: this fork changes the same files upstream does (the UI, the update path, the display bring-up), so the conflicts are real ones and want the phone at hand."
+            echo
+            echo "When it is merged, write the new commit into `.github/upstream/main.txt` so this goes quiet again."
+          } )
+          existing=$(gh issue list --state open --search "in:title ${title}" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
