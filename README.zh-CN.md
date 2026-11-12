@@ -6,7 +6,7 @@
 
 Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
-> **小米 MIX Flip 2（`bixi`）· 1.0.0** —— 本分支把 Skyward 做成这台机器的版本（SM8750，Android 17，A/B + 动态分区，现役系统 `OS4.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）。外屏是主力屏；密码记住一次之后 `/data` 自己就开；分区镜像可以存到 U 盘；`avbctl` 改完会把写前写后的 flags 差值报回来；recovery 还能从 GitHub 发行里更新自己——**优先裸 `.img`，没有才退回 `.zip`**，并且走你选的加速源。
+> **小米 MIX Flip 2（`bixi`）· 1.0.1** —— 本分支把 Skyward 做成这台机器的版本（SM8750，Android 17，A/B + 动态分区，现役系统 `OS4.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）。外屏是主力屏；密码记住一次之后 `/data` 自己就开；分区镜像可以存到 U 盘；`avbctl` 改完会把写前写后的 flags 差值报回来；recovery 还能从 GitHub 发行里更新自己——**优先裸 `.img`，没有才退回 `.zip`**，并且走你选的加速源。
 > 完整变更、借鉴了哪些 fork 的哪些做法、以及已知限制：见 [CHANGELOG-bixi.md](CHANGELOG-bixi.md) · [Releases](https://github.com/XQAB/skyward/releases)
 > 移植的决策记录（bixi 的单一真相源）：[docs/bixi-porting.md](docs/bixi-porting.md)
 
@@ -96,10 +96,10 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 
 ## 安装 Skyward
 
-Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照 `SHA256SUMS` 里的 SHA-256 校验（`sha256sum skyward-bixi.img`），然后写入当前运行槽位的 recovery 分区：
+Skyward 需要已解锁的 bootloader。从 [Releases](https://github.com/XQAB/skyward/releases) 下载这台机器的镜像——最新的是 `skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`，`0.32.00` 是第一版带外屏（合盖屏）的镜像，`0.37.00` 起外屏触摸在真机上验收通过——对照 `SHA256SUMS` 里的 SHA-256 校验（`sha256sum skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`），然后写入当前运行槽位的 recovery 分区：
 
 ```sh
-dd if=skyward-bixi.img of=/dev/block/by-name/recovery_a bs=1048576
+dd if=skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
 ```
 
 这台机器用 `fastboot flash recovery` 刷 100MB 的镜像会在中途断链（`Write to device failed (no link)`），所以从 root shell 写——在 Skyward 里，或者通过 `adb`——才是可靠的方式。

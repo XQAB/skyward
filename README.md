@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 Skyward is a recovery written in Rust, from scratch.
 
-> **MIX Flip 2 (`bixi`) · 1.0.0** — this branch builds Skyward for the Xiaomi MIX Flip 2
+> **MIX Flip 2 (`bixi`) · 1.0.1** — this branch builds Skyward for the Xiaomi MIX Flip 2
 > (SM8750, Android 17, A/B + dynamic partitions, running `OS4.0.11.XOHCNXM`, built on
 > `OS4.0.0.11.XOHCNXM`). The cover display is the
 > primary screen, `/data` unlocks itself once the password has been kept, images can be
@@ -110,14 +110,15 @@ comes on when the phone is shut, its touch, and the rest of the bixi changes —
 ## Installing Skyward
 
 Skyward needs an unlocked bootloader. Download the image for this phone from
-[Releases](https://github.com/XQAB/skyward/releases) — `0.32.00` is the first version
-with the cover panel, and `0.37.00` is the first one whose cover touch was accepted on
-the phone — check it against the SHA-256 in `SHA256SUMS` (`sha256sum skyward-bixi.img`), and
-write it to the recovery
+[Releases](https://github.com/XQAB/skyward/releases) — the newest one is
+`skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`, and `0.32.00` was the first version
+with the cover panel, `0.37.00` the first one whose cover touch was accepted on
+the phone — check it against the SHA-256 in `SHA256SUMS`
+(`sha256sum skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`), and write it to the recovery
 partition of the slot the phone runs from:
 
 ```sh
-dd if=skyward-bixi.img of=/dev/block/by-name/recovery_a bs=1048576
+dd if=skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
 ```
 
 `fastboot flash recovery` on this phone drops the link partway through a 100MB

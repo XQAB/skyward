@@ -1,9 +1,25 @@
-# Skyward for bixi · 1.0.0
+# Skyward for bixi · 1.0.1
 
 > 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
 
-## 这是第一个可以日常用的版本
+## 1.0.1
+
+1.0.0 之后的收尾版：不改正常使用路径上的行为，补上发布自检、文档，并把几个一直挂着的缺口关掉。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| 发版只认 sha256 | ✅ | v1.0.0 说明里的 MD5 表删掉，资产表全部换成资产 digest 的 sha256；此后校验只认 sha256 |
+| `7za l` | ✅ | 按 7-Zip 的六列（`Date/Time`、`Attr`、`Size`、`Compressed`、`Name`）打印，末行合计 `N file(s), M folder(s)`，可按名字筛选，只读目录区；`.7z` 容器仍不做（要背一个 LZMA/LZMA2 解码器，这套 shim 只为从 zip 里取镜像，原因见「已知限制」） |
+| MTP 未解锁提示 | ✅ | 文件传输开着而 `/data` 没解锁时，设置页直接说「电脑上看不到文件：data 还没解锁」，副标题给出顺序（先解密、后插线），点这一行进「解密」页；脚注随「文件传输开/关、data 解锁/未解锁」四种组合换文案 |
+| `tools/verify-release.py` | ✅ 已进 CI | 打包后当场把镜像按 bootloader 的读法拆回去核一遍：boot v4 头（recovery 无 kernel）、LZ4 legacy ramdisk、newc 归档、`<codename>_extra` 每个文件逐字节、五个 `system/bin` 软链（`7za`/`zstd`/`unzip`/`avbctl`/`resetprop` → `recovery`）、镜像内 `Skyward <版本>` 串、`prop.default` 出包基线对 `[stock].version`、packer 设置与剥离的属性、extra 二进制的 `DT_NEEDED` 依赖闭包；报告随 img/zip 进 artifact。清单从 `<codename>_extra/` 生成，不认机型 |
+| About 页出包基线对比 | ⏳ 留真机验收 | 本版没有动 UI：改之前要先在真机上确认 system 的挂载路径，留为下一版第一项 |
+| 文档 | ✅ | `docs/bixi-porting.md`（bixi 移植记录的单一真相源）、`bixi_extra/SOURCES.md`（8 个 extra 文件的出处与用途） |
+
+`1.0.1` 的资产：`skyward-v1.0.1-bixi-OS4.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
+同名 `.zip`（自更新可直接吃）、`SHA256SUMS`（两个资产的 sha256）、`verify-report.txt`（本版镜像的自检报告）。
+
+## 1.0.0：这是第一个可以日常用的版本
 
 从 0.44 到 0.67，这台机器上被逐项打通的是「折叠机 recovery 到底还缺什么」：外屏、触摸、解密、存储、备份、AVB、安装脚本、更新。1.0.0 不是又一个功能版，而是把这些拼成一条**完整链路**——进 recovery、看见界面、解开 /data、备份、改 AVB、装包、更新自己，全部走得通，且每一步都在真机上验过。
 
@@ -48,6 +64,7 @@
 | 0.66.01 | 自更新改为优先裸 `.img`；第一次同时挂 `.img` + `.zip` 两份资产 |
 | 0.67 | 「Skyward 更新」页补加速源行；加速源扩到 6 档；**检查更新走代理，与下载分开策略** |
 | **1.0.0** | 汇总以上全部，版本号落定，README 与发行说明重写 |
+| **1.0.1** | 发版只认 sha256、`7za l`、MTP 未解锁提示、`verify-release.py` 进 CI、移植文档入库（About 基线对比留真机验收） |
 
 ## 逐项说明
 
@@ -136,6 +153,8 @@
 - 系统「在线更新」页没有加速源（镜像站不转 MIUI 的接口）。
 - 自更新的裸 `.img` 分支在 0.67.00 → 0.67.01 这一跳上跑过，1.0.0 的完整结论见发行说明下方。
 - 双击亮屏的代价是熄屏时整机不再休眠。
+- `verify-release.py` 的出包基线比对：同一机型、同一条 OS 线的同一渠道码（例如包里的 recovery 是 `OS4.0.3.1.XPICN`、配置里是 `OS4.0.4.0.XPICNXM`）算 **warn** 并写明「包里的 recovery 建得比包本身早」；跨线（major.minor 或渠道码不同）才算 FAIL。
+- `libbinder_ndk.so` 在 extra 里没有对应文件，自检只以 ELF `DT_NEEDED` 告警覆盖，没有硬性检查。
 
 ## 资产
 
