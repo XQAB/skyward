@@ -284,7 +284,7 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
         source.read_exact(&mut buf[..n]).context("read the image")?;
         written.update(&buf[..n]);
         for (path, f, _, cleared) in &mut outs {
-            f.write_all(&buf[..n]).map_err(|e| refused(*path, *cleared, e))?;
+            f.write_all(&buf[..n]).map_err(|e| refused(path, *cleared, e))?;
             done += n as u64;
             progress(done, total);
         }
