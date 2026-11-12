@@ -661,7 +661,8 @@ mod tests {
         assert_eq!(&file[0][7..8], "-", "{file:?}");
         assert_eq!(file[2], "....A", "{file:?}");
         assert_eq!((file[3].as_str(), file[4].as_str()), ("2", "2"), "the size it is, then the size it stands in the archive: {file:?}");
-        let folder = columns("images");
+        // A folder's row carries the trailing slash it has in the archive.
+        let folder = columns("images/");
         assert_eq!(folder[2], "D....", "{folder:?}");
         let last = text.lines().last().unwrap();
         let added: Vec<&str> = last.split_whitespace().collect();
