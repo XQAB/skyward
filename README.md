@@ -222,12 +222,30 @@ target/release/skyward-pack recovery \
   --mono resources/fonts/KirkMono-Regular.ttf \
   --mono-license resources/fonts/KirkMono-OFL.txt \
   --extra bixi_extra \
+  --out target/skyward-bixi.img
+```
 
 `bixi_extra/` ships with this repository: it holds the secure-element and
 weaver pieces the bixi build layers on top of the stock recovery, so a plain
-clone builds without a second directory next to it.
-  --out target/skyward-bixi.img
+clone builds without a second directory next to it. A phone that needs none of
+its own files simply has no `<codename>_extra/`.
+
+What was packed is then read back the way the bootloader and init read it:
+
+```sh
+tools/verify-release.py target/skyward-bixi.img \
+  --config devices/bixi.toml \
+  --extra bixi_extra
 ```
+
+It takes the image apart itself — the boot header, the LZ4 legacy ramdisk, the
+newc archive inside it — and says which pieces are there: every file under
+`<codename>_extra/`, the commands a stock recovery lacks as links to
+`recovery`, the version the binary says it is, and the stock build
+`prop.default` names, against `[stock].version` in the device file. It needs
+no tool but Python 3.11 or later, and exits 1 when a check fails. The build runs
+it for every device right after packing and keeps the report with the artifacts,
+so a build that quietly lost a vendor file fails in CI instead of on the phone.
 
 Tests and lints run on the computer; what runs only on the phone is linted for it:
 

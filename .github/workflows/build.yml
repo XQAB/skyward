@@ -62,15 +62,17 @@ jobs:
         run: cargo ndk -t arm64-v8a --platform 30 build --release ${{ github.ref_type != 'tag' && '--locked' || '' }} -p skyward-system-init --target-dir target/system-init
       - name: Build the packer
         run: cargo build --release ${{ github.ref_type != 'tag' && '--locked' || '' }} -p skyward-pack
+      # The built programs are staged in dist/, apart from the repository's own
+      # tools/, which keeps the release checker and is copied out untouched.
       - name: Gather them
         run: |
-          mkdir tools
-          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack tools/
-          cp target/system-init/aarch64-linux-android/release/system-init tools/
+          mkdir dist
+          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack dist/
+          cp target/system-init/aarch64-linux-android/release/system-init dist/
       - uses: actions/upload-artifact@v7
         with:
           name: tools
-          path: tools/
+          path: dist/
           if-no-files-found: error
           retention-days: 1
 
@@ -105,12 +107,12 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: tools
-          path: tools
+          path: dist
       - name: Make the tools runnable
-        run: chmod +x tools/skyward tools/skyward-pack
+        run: chmod +x dist/skyward dist/skyward-pack
       - name: Read the stock build the recovery is made on
         id: stock
-        run: tools/skyward-pack stock --config "devices/${{ matrix.device }}.toml" >> "$GITHUB_OUTPUT"
+        run: dist/skyward-pack stock --config "devices/${{ matrix.device }}.toml" >> "$GITHUB_OUTPUT"
       - name: Restore the stock recovery
         id: cache
         uses: actions/cache@v6
@@ -121,7 +123,7 @@ jobs:
       # which is several gigabytes in all.
       - name: Take the recovery partition out of the stock package
         if: steps.cache.outputs.cache-hit != 'true'
-        run: tools/skyward-pack stock --config "devices/${{ matrix.device }}.toml" --out stock/recovery.img
+        run: dist/skyward-pack stock --config "devices/${{ matrix.device }}.toml" --out stock/recovery.img
       - name: Check the stock recovery
         env:
           RECOVERY: ${{ steps.stock.outputs.recovery }}
@@ -140,10 +142,24 @@ jobs:
           # recovery's own root; they go into the image along with the binary.
           extra=()
           if [ -d "${DEVICE}_extra" ]; then extra=(--extra "${DEVICE}_extra"); fi
-          tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --system-init tools/system-init \
+          dist/skyward-pack recovery --stock stock/recovery.img --binary dist/skyward --system-init dist/system-init \
             --config "devices/$DEVICE.toml" --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt "${extra[@]}" --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+      # The image is read back the way the bootloader reads it — header, ramdisk
+      # framing, the archive's entries — so a build that quietly lost a vendor
+      # file or a command link fails here and not on the phone.
+      - name: Check what was packed
+        env:
+          DEVICE: ${{ matrix.device }}
+          NAME: ${{ steps.pack.outputs.name }}
+        run: |
+          extra=()
+          if [ -d "${DEVICE}_extra" ]; then extra=(--extra "${DEVICE}_extra"); fi
+          version=()
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version=(--version "${GITHUB_REF_NAME#v}"); fi
+          python3 tools/verify-release.py "out/$NAME.img" --config "devices/$DEVICE.toml" \
+            --report "out/$NAME.verify.txt" "${extra[@]}" "${version[@]}"
       # The image is the whole partition, flashed as it is, and most of it
       # is the room the recovery leaves empty; it is handed out zipped.
       - name: Zip the image
@@ -159,6 +175,7 @@ jobs:
           path: |
             out/${{ steps.pack.outputs.name }}.img
             out/${{ steps.pack.outputs.name }}.zip
+            out/${{ steps.pack.outputs.name }}.verify.txt
           if-no-files-found: error
           retention-days: 7
 
