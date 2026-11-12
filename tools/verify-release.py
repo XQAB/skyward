@@ -271,8 +271,16 @@ def mode_for(name):
 
 
 def version_of(manifest):
-    """The version in the workspace's Cargo.toml, as the recovery compiles it in."""
-    text = Path(manifest).read_text(encoding="utf-8")
+    """The version in the workspace's Cargo.toml, as the recovery compiles it in.
+
+    Read only when no ``--version`` was given, and never fatal: run from
+    outside the repository — or from a folder holding no manifest — there is
+    simply no second version to look for.
+    """
+    try:
+        text = Path(manifest).read_text(encoding="utf-8")
+    except OSError:
+        return None
     match = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
     return match.group(1) if match else None
 
@@ -442,9 +450,10 @@ def verify(image, config, extra, version, manifest):
     # Which version the binary says it is, as About shows it and as the phone
     # names the release it asks for next.
     versions = [version] if version else []
-    compiled = version_of(manifest)
-    if compiled and compiled not in versions:
-        versions.append(compiled)
+    if not version:
+        compiled = version_of(manifest)
+        if compiled:
+            versions.append(compiled)
     binary = by_name.get(RECOVERY)
     if binary is not None:
         found = [v for v in versions if f"Skyward {v}".encode() in binary.data]
