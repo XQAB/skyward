@@ -459,7 +459,7 @@ mod tests {
         let listed = ["images/", "images/a.txt", "t.txt", "d.txt/", "d.txt/inner.bin", "x/", "x/images/", "x/images/a.txt"];
         let picked = |names: &[&str], recurse: Recurse| -> Vec<&str> {
             let names: Vec<Name> = names.iter().map(|n| Name::new(n, recurse).unwrap()).collect();
-            let request = Request { folders: true, archive: PathBuf::new(), names, to: To::Output, existing: Existing::Ask };
+            let request = Request { folders: true, list: false, archive: PathBuf::new(), names, to: To::Output, existing: Existing::Ask };
             listed.iter().copied().filter(|path| !path.ends_with('/') && request.picks(&parts(path), false)).collect()
         };
         let none = Vec::<&str>::new();
