@@ -102,9 +102,8 @@ read and set properties.
 | Xiaomi MIX Flip 2 | `bixi` | OS4.0.11.XOHCNXM (Android 17) |
 
 This fork keeps Skyward for that phone only. The work on it — the cover screen that
-comes on when the phone is shut, its touch, and the rest of the bixi changes — is in
-the [`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)
-branch, and the images are on
+comes on when the phone is shut, its touch, and the rest of the bixi changes — is on
+`main`, and the images are on
 [Releases](https://github.com/XQAB/skyward/releases).
 
 ## Installing Skyward

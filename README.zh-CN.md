@@ -90,9 +90,8 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。
 | --- | --- | --- |
 | 小米 MIX Flip 2 | `bixi` | OS4.0.11.XOHCNXM（Android 17） |
 
-这个分支只维护这一台机器。合上手机后点亮的外屏、外屏触摸，以及 bixi 的其他改动都在
-[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)
-分支上，镜像在 [Releases](https://github.com/XQAB/skyward/releases)。
+这个仓库只维护这一台机器。合上手机后点亮的外屏、外屏触摸，以及 bixi 的其他改动都在
+`main` 上，镜像在 [Releases](https://github.com/XQAB/skyward/releases)。
 
 ## 安装 Skyward
 
