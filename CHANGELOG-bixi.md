@@ -124,7 +124,7 @@
 - **aurora fork**：`AVB 校验` 页的版式与「改动」小节的分段（先准备、再执行）、BCB/启动指令页、更新页的信息层次，都参考了它的写法。原则是**只取读路径**，写路径（真正落 flags、落分区）自己重写并加备份。
 - **Rinrroy/skyward-for-haotian**：折叠机外屏「只驱动一块面板」的思路参考；取源码走 `raw.githubusercontent.com` 经镜像站，避开本机 clone 不稳。
 - **KernelSU 的 `resetprop`**：命令行与语义对齐它（读/写经 init、不改属性内存、`-n`/`-v` 照旧），因为安装脚本是按 KernelSU 的用法写的。
-- **命令行语义**：`7za` 对齐 7-Zip（`x`/`e`/`-so`/`-o`/`-aoa`/`-aos`/`-r*`/`-bd`/`-mmt`），`zstd` 对齐 zstd 本体，`unzip` 对齐 busybox unzip 的 `-p`，`avbctl` 对齐 AOSP 的 `get-`/`disable-`/`enable-` 子命令与 `--force`。
+- **命令行语义**：`7za` 对齐 7-Zip（`x`/`e`/`l`/`-so`/`-o`/`-aoa`/`-aos`/`-r*`/`-bd`/`-mmt`，其中 `l` 的表头、列宽与合计行照 7-Zip 的列表输出），`zstd` 对齐 zstd 本体，`unzip` 对齐 busybox unzip 的 `-p`，`avbctl` 对齐 AOSP 的 `get-`/`disable-`/`enable-` 子命令与 `--force`。
 - **AVB 规范**：flags 位（verity / verification）与「改 flags 会让签名失效」的判断来自 AVB 的公开文档。
 - **镜像加速**：`gh-proxy` 系列（`gh-proxy.com` / `gh-proxy.org` / `gh-proxy.cc`）与 `ghfast.top`、`github.akams.cn`，实测数据见发行说明。
 
@@ -132,7 +132,7 @@
 
 - `user 999` 打不开（recovery 里 gatekeeper 起不来），不影响 user 0。
 - 两块面板不能同时驱动，只能按折叠状态各驱动一块。
-- 安装包只支持 zip；`7za` 目前 `x`/`e` 可用，但没有 `l`，也不认 `.7z` 容器。
+- 安装包只支持 zip；`7za` 的 `x`/`e`/`l` 都可用，但**不认 `.7z` 容器**：7z 用的是 LZMA/LZMA2 与它自己的容器格式（要再带一个 LZMA 解码器和容器解析），recovery 里这套 shim 只值当「把 zip 里的镜像取出来」，为它多背一个解码器不值。真要装 `.7z` 包，先在上位机转成 zip。
 - 系统「在线更新」页没有加速源（镜像站不转 MIUI 的接口）。
 - 自更新的裸 `.img` 分支在 0.67.00 → 0.67.01 这一跳上跑过，1.0.0 的完整结论见发行说明下方。
 - 双击亮屏的代价是熄屏时整机不再休眠。

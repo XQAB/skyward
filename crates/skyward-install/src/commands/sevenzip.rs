@@ -1,7 +1,9 @@
 //! 7za as install scripts run it to take files out of the zip they came
 //! in: `e` and `x`, which write the files their names pick to standard
 //! output with `-so`, or into a folder, `x` keeping the folders the files
-//! are in. Names pick files as 7-Zip's do; the archive is read as a zip.
+//! are in; and `l`, which lists what the archive holds with the table
+//! 7-Zip prints. Names pick files as 7-Zip's do; the archive is read as a
+//! zip.
 
 use super::{copy, Failed, Io, CHUNK};
 use anyhow::{anyhow, bail, Context, Result};
@@ -27,7 +29,8 @@ pub(super) fn run(args: &[OsString], io: &mut Io) -> i32 {
             return USAGE;
         }
     };
-    match extract(&request, io) {
+    let done = if request.list { list(&request, io) } else { extract(&request, io) };
+    match done {
         Ok(()) => DONE,
         Err(e) => {
             let _ = writeln!(io.errors, "7za: {e:#}");
@@ -42,6 +45,8 @@ struct Request {
     /// `x` keeps the folders a file is in inside the archive; `e` puts each
     /// file straight into the folder it is taken out to.
     folders: bool,
+    /// `l` lists the archive instead of taking files out of it.
+    list: bool,
     archive: PathBuf,
     /// No names pick every file.
     names: Vec<Name>,
@@ -135,11 +140,12 @@ fn parse(args: &[OsString]) -> Result<Request, String> {
         }
     }
     let mut words = words.into_iter();
-    let folders = match words.next().map(str::to_ascii_lowercase).as_deref() {
-        Some("x") => true,
-        Some("e") => false,
-        Some(other) => return Err(format!("unsupported command {other}; e and x take files out of zip archives")),
-        None => return Err("no command; e and x take files out of zip archives".into()),
+    let (folders, list) = match words.next().map(str::to_ascii_lowercase).as_deref() {
+        Some("x") => (true, false),
+        Some("e") => (false, false),
+        Some("l") => (false, true),
+        Some(other) => return Err(format!("unsupported command {other}; e, x and l read zip archives")),
+        None => return Err("no command; e, x and l read zip archives".into()),
     };
     let archive = PathBuf::from(words.next().ok_or("no archive named")?);
     let names = words.map(|name| Name::new(name, recurse)).collect::<Result<_, _>>()?;
@@ -148,7 +154,7 @@ fn parse(args: &[OsString]) -> Result<Request, String> {
         false => To::Folder(folder.unwrap_or_default()),
     };
     let existing = overwrite.unwrap_or(if yes { Existing::Replace } else { Existing::Ask });
-    Ok(Request { folders, archive, names, to, existing })
+    Ok(Request { folders, list, archive, names, to, existing })
 }
 
 /// A name on the command line, which picks files as 7-Zip's names pick
@@ -239,6 +245,80 @@ fn fits(pattern: &str, text: &str) -> bool {
         }
     }
     pattern[p..].iter().all(|&c| c == '*')
+}
+
+/// The columns 7-Zip's listing keeps its table in, and the line it draws
+/// above and below the files.
+const LIST_HEAD: &str = "   Date      Time    Attr         Size   Compressed  Name";
+const LIST_RULE: &str = "------------------- ----- ---------- ----------  ------------------------";
+
+/// Where nothing was written: the width of a date and time, kept so the
+/// columns below it stay in line.
+const BLANK_TIME: &str = "                   ";
+
+/// List what the archive holds, in the table 7-Zip prints: the time, the
+/// kind of entry, its size as it is and as it stands in the archive, and
+/// its path. The names pick which rows are listed, as they pick what `e`
+/// and `x` take out.
+fn list(request: &Request, io: &mut Io) -> Result<()> {
+    let archive = &request.archive;
+    let file = File::open(archive).with_context(|| format!("open {}", archive.display()))?;
+    let reader = BufReader::with_capacity(CHUNK, file);
+    let mut zip = ZipArchive::new(reader).with_context(|| format!("read {} as a zip archive", archive.display()))?;
+    let (mut rows, mut files, mut folders) = (Vec::new(), 0u32, 0u32);
+    let (mut whole, mut packed, mut newest) = (0u64, 0u64, None);
+    for index in 0..zip.len() {
+        let entry = zip.by_index(index).with_context(|| format!("open entry {index} of {}", archive.display()))?;
+        let name = entry.name().to_string();
+        let folder = entry.is_dir();
+        if !request.picks(&parts(&name), folder) {
+            continue;
+        }
+        let at = entry.last_modified();
+        let when = at.map(stamp).unwrap_or_else(|| BLANK_TIME.to_string());
+        newest = at.or(newest);
+        let (attr, size, compressed) = match folder {
+            true => ("D....", 0, 0),
+            false => {
+                files += 1;
+                whole += entry.size();
+                packed += entry.compressed_size();
+                ("....A", entry.size(), entry.compressed_size())
+            }
+        };
+        if folder {
+            folders += 1;
+        }
+        rows.push(format!("{when} {attr:5} {size:>10} {compressed:>10}  {name}"));
+    }
+    let when = newest.map(stamp).unwrap_or_else(|| BLANK_TIME.to_string());
+    let counted = match folders {
+        0 => format!("{files} file{}", plural(files)),
+        _ => format!("{files} file{}, {folders} folder{}", plural(files), plural(folders)),
+    };
+    let mut text = String::new();
+    for line in [LIST_HEAD, LIST_RULE].into_iter().chain(rows.iter().map(String::as_str)) {
+        text.push_str(line);
+        text.push('\n');
+    }
+    text.push_str(LIST_RULE);
+    text.push('\n');
+    text.push_str(&format!("{when} {:5} {whole:>10} {packed:>10}  {counted}", ""));
+    text.push('\n');
+    write!(io.output, "{text}").context("write to standard output")
+}
+
+/// The time an entry says it was last changed, in 7-Zip's columns.
+fn stamp(at: zip::DateTime) -> String {
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", at.year(), at.month(), at.day(), at.hour(), at.minute(), at.second())
+}
+
+/// What follows a count in 7-Zip's last line.
+fn plural(n: u32) -> &'static str {
+    match n {
+        1 => "",
+        _ => "s",
+    }
 }
 
 /// Take the files the request picks out of its archive, in the order the
@@ -564,13 +644,47 @@ mod tests {
     }
 
     #[test]
+    fn l_lists_what_the_archive_holds_in_seven_zip_s_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = written(dir.path(), &[stored("images/", b""), stored("images/a.img", b"aa"), stored("t.txt", b"ttt")]);
+        let (code, output, errors) = seven(&archive, &["l", "{zip}"]);
+        let text = String::from_utf8(output).unwrap();
+        assert_eq!((code, errors.as_str()), (DONE, ""), "{text}");
+        assert!(text.starts_with(LIST_HEAD), "{text}");
+        let columns = |name: &str| -> Vec<String> {
+            let line = text.lines().find(|line| line.ends_with(&format!("  {name}"))).unwrap_or_else(|| panic!("no row for {name} in {text}"));
+            line.split_whitespace().map(str::to_string).collect()
+        };
+        let file = columns("images/a.img");
+        assert_eq!(file.len(), 6, "{file:?}");
+        assert_eq!(&file[0][4..5], "-", "the date comes first, as 7-Zip writes it: {file:?}");
+        assert_eq!(&file[0][7..8], "-", "{file:?}");
+        assert_eq!(file[2], "....A", "{file:?}");
+        assert_eq!((file[3].as_str(), file[4].as_str()), ("2", "2"), "the size it is, then the size it stands in the archive: {file:?}");
+        let folder = columns("images");
+        assert_eq!(folder[2], "D....", "{folder:?}");
+        let last = text.lines().last().unwrap();
+        let added: Vec<&str> = last.split_whitespace().collect();
+        assert_eq!((added[2], added[3]), ("5", "5"), "the sizes added up: {last}");
+        assert!(last.ends_with("  2 files, 1 folder"), "{last}");
+
+        let (_, output, _) = seven(&archive, &["l", "{zip}", "images/a.img"]);
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("images/a.img"), "{text}");
+        assert!(!text.contains("t.txt"), "a name picks the rows listed, as it picks what goes out: {text}");
+        let last = text.lines().last().unwrap();
+        let added: Vec<&str> = last.split_whitespace().collect();
+        assert_eq!((added[2], added[3]), ("2", "2"), "{last}");
+        assert!(last.ends_with("  1 file"), "{last}");
+    }
+
+    #[test]
     fn commands_and_switches_it_does_not_have_are_refused() {
         let dir = tempfile::tempdir().unwrap();
         let archive = written(dir.path(), &[stored("a", b"a")]);
         for args in [
             &[][..],
             &["e"],
-            &["l", "{zip}"],
             &["a", "{zip}", "file"],
             &["e", "-p1234", "{zip}"],
             &["e", "-x!a", "{zip}"],

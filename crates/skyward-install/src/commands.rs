@@ -1,7 +1,8 @@
 //! The commands install scripts written for other recoveries run that a
 //! stock recovery does not carry: 7za, which takes a partition image out of
-//! the zip the script came in, and zstd, which decompresses it on its way to
-//! the partition; avbctl, which turns off verified boot's checks before a
+//! the zip the script came in and lists one when a script asks what it
+//! holds, and zstd, which decompresses it on its way to the partition;
+//! avbctl, which turns off verified boot's checks before a
 //! script writes a system that would not pass them, and resetprop, which
 //! reads the phone's properties and sets them; and unzip, as the stock
 //! recovery's own but pouring out what `-p` takes as it reads it. The
