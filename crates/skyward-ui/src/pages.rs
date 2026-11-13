@@ -648,6 +648,16 @@ fn about_cards(cx: &Ctx, c: &mut Canvas) -> (Vec<Hit>, f32, f32) {
     if let Some(r) = &i.android {
         facts.push(Fact { title: l.pick(ANDROID_VERSION), value: r.clone(), link: false });
     }
+    // Properties a partition would not give up are named here, by partition
+    // and file: the About page shows fewer of them than it should, and says
+    // which file it could not read rather than leaving the gap unexplained.
+    if !i.unreadable.is_empty() {
+        facts.push(Fact {
+            title: l.pick(["部分属性不可读", "部分屬性不可讀", "Some properties unreadable"]),
+            value: i.unreadable.join("\n"),
+            link: false,
+        });
+    }
     let summary = widgets::facts(c, t, f, m.dp(490.7), &facts, &tone);
     out.push(Hit { rect: summary.rows[1], action: Action::Open(Screen::Specs) });
 

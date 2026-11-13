@@ -9,6 +9,8 @@ use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::str::FromStr;
+use std::thread;
+use std::time::Duration;
 
 /// Version of this build, shown on the About page.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -45,6 +47,10 @@ pub struct DeviceInfo {
     pub slot: Option<Slot>,
     pub snapshot: SnapshotState,
     pub boot: Boot,
+    /// Build.prop files of the installed system that could not be read, each
+    /// named by its partition and the file, as `system_ext_a etc/build.prop`.
+    /// Empty while Android runs, where there are no such files to read.
+    pub unreadable: Vec<String>,
 }
 
 /// `ro.build.version.security_patch`, a calendar date.
@@ -162,7 +168,109 @@ pub fn collect(cfg: &DeviceConfig) -> Result<DeviceInfo> {
         slot: skyward_vab::current_slot()?,
         snapshot: skyward_vab::snapshot_state()?,
         boot: Boot { unlocked, verified: skyward_block::boot_param("androidboot.verifiedbootstate")? },
+        unreadable: system.unreadable(),
     })
+}
+
+/// A build.prop file of the installed system that could not be read, named by
+/// the partition it belongs to and the file itself, so the About page says
+/// which properties it is missing rather than showing fewer without a word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unreadable {
+    pub partition: String,
+    pub file: String,
+    pub error: String,
+}
+
+impl Unreadable {
+    /// As the About page names it: the partition and the file.
+    pub fn line(&self) -> String {
+        format!("{} {}", self.partition, self.file)
+    }
+}
+
+/// What the installed system's build.prop files hold, and the ones that
+/// could not be read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstalledProps {
+    pub props: HashMap<String, String>,
+    pub unreadable: Vec<Unreadable>,
+}
+
+/// How long to wait before asking a build.prop file again: long enough for a
+/// slow page to come back, short enough that a file which will never be read
+/// does not hold the start up.
+const RETRY_AFTER: Duration = Duration::from_millis(200);
+
+/// Whether a failure may pass on its own, as a bad page read or a timeout
+/// does. Only these are asked for again: the inode of an image written wrong
+/// fails the same way every time, and a second read of it is 200ms spent
+/// waiting for nothing.
+fn transient(e: &anyhow::Error) -> bool {
+    e.chain().filter_map(|c| c.downcast_ref::<std::io::Error>()).any(|io| {
+        // EIO and ETIMEDOUT as the block layer reports them; the numbers are
+        // written out as `<errno.h>` has them, not taken from `libc`.
+        matches!(io.raw_os_error(), Some(5) | Some(110)) || matches!(io.kind(), ErrorKind::TimedOut)
+    })
+}
+
+/// One read of `path` into `props`: `None` when the file is not there at
+/// all, as a partition that does not carry it.
+fn read_props(path: &Path, props: &mut HashMap<String, String>) -> Result<Option<()>> {
+    match fs::metadata(path) {
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(anyhow!("{e}")),
+        Ok(_) => {}
+    }
+    rsproperties::load_properties_from_file(path, None, "u:r:init:s0", props).map_err(|e| anyhow!("{e:#}"))?;
+    Ok(Some(()))
+}
+
+/// The installed system's build properties, in init's order.
+pub fn installed_props(slot: Slot) -> Result<HashMap<String, String>> {
+    Ok(installed_props_report(slot)?.props)
+}
+
+/// The installed system's build properties, in init's order, with the files
+/// that could not be read so the recovery can name them.
+///
+/// A partition that mounts but cannot be looked into must not take the
+/// recovery down with it: these properties are what the About page shows, not
+/// what runs. A file that fails with a bad page or a timeout is asked for
+/// once more after `RETRY_AFTER`; one that still fails is left out, written to
+/// the kernel log, where a phone stuck at a boot logo can be read, and carried
+/// to the About page by name.
+pub fn installed_props_report(slot: Slot) -> Result<InstalledProps> {
+    let base = |m: &skyward_vab::Mounted| -> String {
+        m.partition.strip_suffix(slot.suffix()).expect("mounted partitions carry the slot suffix").to_string()
+    };
+    let mut parts = skyward_vab::mounted_partitions(slot)?;
+    parts.sort_by_key(|m| PROP_ORDER.iter().position(|b| *b == base(m)).unwrap_or(PROP_ORDER.len()));
+    let mut out = InstalledProps { props: skyward_sys::props(BOOT_PROPS).into_iter().collect(), unreadable: Vec::new() };
+    for m in &parts {
+        let files: &[&str] = match base(m).as_str() {
+            "system" => &["system/build.prop"],
+            "vendor" => &["default.prop", "build.prop"],
+            _ => &["etc/build.prop"],
+        };
+        for f in files {
+            let path = m.mount_point.join(f);
+            let mut asked = 0;
+            let failure = loop {
+                asked += 1;
+                match read_props(&path, &mut out.props) {
+                    Ok(_) => break None,
+                    Err(e) if asked == 1 && transient(&e) => thread::sleep(RETRY_AFTER),
+                    Err(e) => break Some(e),
+                }
+            };
+            if let Some(e) = failure {
+                let _ = skyward_sys::kmsg(&format!("{} of {} is unreadable: {e:#}", f, m.partition));
+                out.unreadable.push(Unreadable { partition: m.partition.clone(), file: f.to_string(), error: format!("{e:#}") });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Build properties of the system the About page describes.
@@ -171,7 +279,7 @@ enum SystemProps {
     Running,
     /// Recovery is running; they come from the build.prop files of the
     /// installed system's mounted partitions, none when nothing is mounted.
-    Installed(HashMap<String, String>),
+    Installed(InstalledProps),
 }
 
 impl SystemProps {
@@ -180,8 +288,8 @@ impl SystemProps {
             return Ok(SystemProps::Running);
         }
         let props = match skyward_vab::current_slot()? {
-            Some(slot) => installed_props(slot)?,
-            None => HashMap::new(),
+            Some(slot) => installed_props_report(slot)?,
+            None => InstalledProps::default(),
         };
         Ok(SystemProps::Installed(props))
     }
@@ -189,7 +297,15 @@ impl SystemProps {
     fn get(&self, name: &str) -> Option<String> {
         match self {
             SystemProps::Running => prop(name),
-            SystemProps::Installed(props) => props.get(name).cloned(),
+            SystemProps::Installed(props) => props.props.get(name).cloned(),
+        }
+    }
+
+    /// The files that could not be read, each as `system_ext_a etc/build.prop`.
+    fn unreadable(&self) -> Vec<String> {
+        match self {
+            SystemProps::Running => Vec::new(),
+            SystemProps::Installed(props) => props.unreadable.iter().map(Unreadable::line).collect(),
         }
     }
 }
@@ -200,47 +316,6 @@ const PROP_ORDER: [&str; 8] = ["system", "system_ext", "system_dlkm", "vendor", 
 
 /// What init names the properties the bootloader passes.
 const BOOT_PROPS: &str = "ro.boot.";
-
-/// The installed system's build properties from its mounted partitions, in
-/// init's order. Partitions init does not list, such as Xiaomi's mi_ext,
-/// come after the ones it does. Init has the properties the bootloader
-/// passes before it reads any of these, and a file may import another named
-/// after them, as Xiaomi's odm imports what each hardware version sets; so
-/// they come first here too, the same in a recovery as in the system.
-pub fn installed_props(slot: Slot) -> Result<HashMap<String, String>> {
-    let base = |m: &skyward_vab::Mounted| -> String {
-        m.partition.strip_suffix(slot.suffix()).expect("mounted partitions carry the slot suffix").to_string()
-    };
-    let mut parts = skyward_vab::mounted_partitions(slot)?;
-    parts.sort_by_key(|m| PROP_ORDER.iter().position(|b| *b == base(m)).unwrap_or(PROP_ORDER.len()));
-    let mut props: HashMap<String, String> = skyward_sys::props(BOOT_PROPS).into_iter().collect();
-    for m in &parts {
-        let files: &[&str] = match base(m).as_str() {
-            "system" => &["system/build.prop"],
-            "vendor" => &["default.prop", "build.prop"],
-            _ => &["etc/build.prop"],
-        };
-        for f in files {
-            let path = m.mount_point.join(f);
-            match fs::metadata(&path) {
-                Err(e) if e.kind() == ErrorKind::NotFound => continue,
-                // A partition that mounts but cannot be looked into must not
-                // take the recovery down with it: these properties are what
-                // the About page shows, not what runs. The reason goes to the
-                // kernel log, where a phone stuck at a boot logo can be read.
-                Err(e) => {
-                    let _ = skyward_sys::kmsg(&format!("{} of {} is unreadable: {e}", f, m.partition));
-                    continue;
-                }
-                Ok(_) => {}
-            }
-            if let Err(e) = rsproperties::load_properties_from_file(&path, None, "u:r:init:s0", &mut props) {
-                let _ = skyward_sys::kmsg(&format!("{} of {} could not be read: {e:#}", f, m.partition));
-            }
-        }
-    }
-    Ok(props)
-}
 
 fn read(path: impl AsRef<Path>) -> Result<String> {
     let p = path.as_ref();

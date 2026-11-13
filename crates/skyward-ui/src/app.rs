@@ -7744,6 +7744,7 @@ mod tests {
             slot: None,
             snapshot: SnapshotState::None,
             boot: Boot { unlocked: None, verified: None },
+            unreadable: Vec::new(),
         }
     }
 
