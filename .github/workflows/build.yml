@@ -1,9 +1,8 @@
 name: Build
 
-# Every push is linted and tested, and the recovery is built for every
-# device in devices/, each image zipped. A tag starting with v publishes
-# those zips as a release, each shown as the phone it is for. Run by hand,
-# it can build for one device alone.
+# Every push is linted and tested, and the recovery is built for bixi — the
+# one phone this fork hands images out for, see the devices job. A tag
+# starting with v publishes those images as a release.
 on:
   push:
     branches: ["**"]
@@ -91,7 +90,11 @@ jobs:
             test -f "devices/$DEVICE.toml"
             echo "devices=$(jq -nc --arg device "$DEVICE" '[$device]')" >> "$GITHUB_OUTPUT"
           else
-            echo "devices=$(basename -s .toml devices/*.toml | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+            # This fork hands out bixi alone. The other configurations stay in
+            # devices/ for upstream comparison, but no image is built for a
+            # phone this fork was never run on, so nobody flashes one by
+            # mistake.
+            echo 'devices=["bixi"]' >> "$GITHUB_OUTPUT"
           fi
 
   recovery:
@@ -208,12 +211,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           assets=()
-          for config in devices/*.toml; do
+          for config in devices/bixi.toml; do
             device=$(basename "$config" .toml)
             model=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["device"]["model"])' "$config")
             img=$(ls images/skyward-"$GITHUB_REF_NAME"-"$device"-*.img)
             zip=$(ls images/skyward-"$GITHUB_REF_NAME"-"$device"-*.zip)
+            report=$(ls images/skyward-"$GITHUB_REF_NAME"-"$device"-*.verify.txt)
             assets+=("$img#$model ($device) - image")
             assets+=("$zip#$model ($device) - zip")
+            assets+=("$report#$model ($device) - verification report")
           done
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes "${assets[@]}" images/SHA256SUMS
