@@ -1,7 +1,27 @@
-# Skyward for bixi · 1.0.2
+# Skyward for bixi · 1.0.3
 
-> 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
+> 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
+
+## 1.0.3
+
+1.0.2 刷进真机后进不了 rec：屏幕一直停在 logo，而 `adb` 看得见设备。真机实测主程序根本没起来：
+
+```
+skyward: devices not brought up: stat /mnt/system_ext/etc/build.prop: Operation not supported (os error 95)
+skyward: recovery failed: stat /mnt/system_ext/etc/build.prop: ... (os error 95)
+init: Service 'recovery' (pid 1438) exited with status 1
+```
+
+那次 `system_ext` 的 erofs 挂载整盘读不进去（`/mnt/system`、`/mnt/product` 同一时刻都正常），而 `installed_props` 只把「文件不存在」当正常，别的错误一律上抛成致命错误，于是一条 build.prop 读不到就能把整个 rec 带走。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| 一条 prop 决定 rec 生死 | ✅ 修（待真机复验） | `installed_props` 读 `build.prop` 遇到任何报错只往 kmsg 写一行（`… of … is unreadable: …`）并跳过，About 页少几条属性，rec 照常起来 |
+| `system_ext` 整盘读不了 | ⏳ 留真机查 | 只降级、没解释：那一次挂载为什么会整盘 `os error 95`（Android 侧同一分区可读）仍在查，证据见 [issue #4](https://github.com/XQAB/skyward/issues/4) |
+
+`1.0.3` 的资产：`skyward-v1.0.3-bixi-OS4.0.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
+同名 `.zip`（自更新可直接吃）、`SHA256SUMS`、`verify-report.txt`。
 
 ## 1.0.2
 

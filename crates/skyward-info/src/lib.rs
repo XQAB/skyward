@@ -224,11 +224,19 @@ pub fn installed_props(slot: Slot) -> Result<HashMap<String, String>> {
             let path = m.mount_point.join(f);
             match fs::metadata(&path) {
                 Err(e) if e.kind() == ErrorKind::NotFound => continue,
-                Err(e) => return Err(e).with_context(|| format!("stat {}", path.display())),
+                // A partition that mounts but cannot be looked into must not
+                // take the recovery down with it: these properties are what
+                // the About page shows, not what runs. The reason goes to the
+                // kernel log, where a phone stuck at a boot logo can be read.
+                Err(e) => {
+                    let _ = skyward_sys::kmsg(&format!("{} of {} is unreadable: {e}", f, m.partition));
+                    continue;
+                }
                 Ok(_) => {}
             }
-            rsproperties::load_properties_from_file(&path, None, "u:r:init:s0", &mut props)
-                .with_context(|| format!("read {}", path.display()))?;
+            if let Err(e) = rsproperties::load_properties_from_file(&path, None, "u:r:init:s0", &mut props) {
+                let _ = skyward_sys::kmsg(&format!("{} of {} could not be read: {e:#}", f, m.partition));
+            }
         }
     }
     Ok(props)

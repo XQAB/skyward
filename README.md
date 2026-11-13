@@ -111,14 +111,14 @@ comes on when the phone is shut, its touch, and the rest of the bixi changes —
 
 Skyward needs an unlocked bootloader. Download the image for this phone from
 [Releases](https://github.com/XQAB/skyward/releases) — the newest one is
-`skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img`, and `0.32.00` was the first version
+`skyward-v1.0.3-bixi-OS4.0.0.11.XOHCNXM.img`, and `0.32.00` was the first version
 with the cover panel, `0.37.00` the first one whose cover touch was accepted on
 the phone — check it against the SHA-256 in `SHA256SUMS`
-(`sha256sum skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img`), and write it to the recovery
+(`sha256sum skyward-v1.0.3-bixi-OS4.0.0.11.XOHCNXM.img`), and write it to the recovery
 partition of the slot the phone runs from:
 
 ```sh
-dd if=skyward-v1.0.2-bixi-OS4.0.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
+dd if=skyward-v1.0.3-bixi-OS4.0.0.11.XOHCNXM.img of=/dev/block/by-name/recovery_a bs=1048576
 ```
 
 `fastboot flash recovery` on this phone drops the link partway through a 100MB
