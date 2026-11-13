@@ -1,7 +1,27 @@
-# Skyward for bixi · 1.0.3
+# Skyward for bixi · 1.0.4
 
 > 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
+
+## 1.0.4
+
+1.0.3 只把「一条 prop 决定 rec 生死」止住了血，`system_ext` 整盘 `os error 95` 留给 issue #4。这版把它查到根、修好，并把「装整包会不会写回 recovery」的答案钉死。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| `system_ext` 整盘 `ENOTSUP` 的根因 | ✅ 定因 | 官方 `payload.bin` 是**大端**头（`CrAU` + `version >Q` + `manifest_size >Q` + `metadata_signature_size >I`，数据段起点 337614），按 protobuf 解 manifest 取 `system_ext` 的 392 个 op，重组出 820,465,664 B 干净镜像（erofs `root_nid=45 / inos=3712 / blocks=196538`，sha256 `1419004596972f…2d549f`）。设备上的 `system_ext_a` 按 super 元数据那 6 个 extent dump 成同样大小，按 8MB 分片逐片比对：**98 片里 97 片与官方包逐位一致，只有 part0（前 8MB）不一致**，而设备那份超级块是 `root_nid=43 / inos=3700 / blocks=195866`。→ 4.0.3.0 那次 merge 在被取消前已往基座写了约 8MB 就停；两槽共享前 5 段 extent，所以 A、B 的 `/etc` 一起坏，`framework` 不受影响 |
+| 修复 | ✅ 真机验过 | 把干净镜像前 8MB（sha256 `9687c46e…d049`）`dd` 到 `/dev/block/sda33` 的 `seek=16631808 count=16384`，再读回同一区间，sha256 与写入逐位一致。随后清掉半截更新状态（`/metadata` 在 rec 里默认 **ro**，必须先 `mount -o remount,rw` 才能删，否则 `rm` 静默失败：`state`、`snapshots/*`、`snapshot-boot`、`/data/gsi/ota/*`） |
+| 修好后的现场 | ✅ 真机验过 | 从 B 槽开机成功（`sys.boot_completed=1`、`ro.boot.slot_suffix=_b`、`OS4.0.0.11.XOHCNXM`）；`ro.system_ext.build.version.incremental` = `17OS4.0.260920.222807714.QCPECN.S`（1.0.3 那个「props 读不出来」的症状消失）；`/system_ext/etc` 87 项、`build.prop` 5894 B、`NOTICE.xml.gz` 202941 B |
+| 新槽 logo 循环的真因 | ✅ 订正 1.0.2 的记录 | 前两次「装到非当前槽 → 重启新槽」停在 logo，不是快照没清、也不是槽位写错：基座上被半写的 `system_ext` 让 init 读不到 `/etc`，VABC 随后回滚。基座修好后同一个 B 槽直接起来了 |
+| 装整包会不会写回 recovery（[issue #4](https://github.com/XQAB/skyward/issues/4)） | ✅ 有正向结果 | `keep_recovery=false` 时 dmesg 里既无 `the recovery partition does not hold Skyward` 也无 `written back to`，`recovery_b` 留原厂；开关打开后装 4.0.0.11 到 B，`recovery_a` 与 `recovery_b` 都是 `17d18608cb1193c4…449241`（Skyward 1.0.3，与装前基线相同），dmesg 三条：`left for the next start: snapshots Snapshotted, merge outstanding true` / `this recovery written back to [B]: Ok(())` / `Installed { slot: B, wipe: false }`。代码侧 `hold()` 传的是**当前运行槽**，不是 next |
+| 写回失败的机制 | ✅ 已订正 | RO 分区上 `open(O_RDWR)` 不被拒（`count=0` 的 `dd` 能过），拒绝发生在 `write()`；`blockdev --setrw` 用 `O_RDONLY` 就能清旗标，所以「先 open 再 `make_writable`」的顺序本身没问题，1.0.2 的 bug 是 `make_writable(...).unwrap_or(false)` 把 `BLKROGET` 的失败吞了 |
+| `make_writable` 三态 | ✅ 已合 | `Writable::{Already, Cleared, StillReadOnly}`：清完还是只读，不再被当成「本来就可写」 |
+| props 读失败 | ✅ 已合 | 只对 EIO/超时类错误做 200 ms 有界重试（erofs inode 坏是稳定错误，重试只是白等）；About 页一行 `Unreadable{partition,file,error}`，带分区名与文件名 |
+| 安装进度看得见 | ⏳ 未达预期 | 百分比仍取 `update_engine` 的 `progress` 行与 fuse 已送字节；引擎不说话的那一段条子不动。真机装包只看到「第 N/3 步」在跳、百分比长时间不动 |
+| 整包会覆盖 `init_boot` | 📌 已知行为 | OTA 直写 boot/init_boot，不走快照；装完 KernelSU 的补丁就没了。重刷 `init_boot_a` / `init_boot_b` 即恢复（本次两槽各 8 MB，`fastboot flash` 均 `OKAY`，`su -v` = `3.3.1:KernelSU`） |
+
+`1.0.4` 的资产：`skyward-v1.0.4-bixi-OS4.0.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
+同名 `.zip`（自更新可直接吃）、`SHA256SUMS`、`verify-report.txt`。
 
 ## 1.0.3
 
@@ -102,6 +122,7 @@ init: Service 'recovery' (pid 1438) exited with status 1
 | 0.67 | 「Skyward 更新」页补加速源行；加速源扩到 6 档；**检查更新走代理，与下载分开策略** |
 | **1.0.0** | 汇总以上全部，版本号落定，README 与发行说明重写 |
 | **1.0.1** | 发版只认 sha256、`7za l`、MTP 未解锁提示、`verify-release.py` 进 CI、移植文档入库（About 基线对比留真机验收） |
+| **1.0.4** | `system_ext` 半写根因定死并修好（只坏前 8MB）、装整包写回 recovery 有正向结果、`make_writable` 三态、About 标红不可读属性 |
 
 ## 逐项说明
 

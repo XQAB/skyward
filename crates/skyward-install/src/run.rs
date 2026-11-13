@@ -777,6 +777,10 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
     // the screen shows a share of the package written by; the bytes the
     // filesystem served say the same before it says anything.
     let mut engine: Option<u16> = None;
+    // When the engine says nothing for a while, the bar still moves: it
+    // creeps by how long this write has been going, and stops short of all
+    // of it so a real number can still take over.
+    let started = Instant::now();
     loop {
         match rx.recv_timeout(PROGRESS_EVERY) {
             Ok(Line::Status(Status::Step(step))) => finishing = step == 2,
@@ -796,7 +800,10 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
         } else {
             let done = match engine {
                 Some(thousandths) => total / 1000 * u64::from(thousandths),
-                None => mount.served().saturating_sub(update.payload_offset).min(total),
+                None => {
+                    let served = mount.served().saturating_sub(update.payload_offset).min(total);
+                    served.max(creeping(total, started.elapsed()))
+                }
             };
             Stage::Writing { done, total }
         };
@@ -815,6 +822,17 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
         (Some(code), None) => Ok(code),
         (None, None) => bail!("update_engine was ended by {ended}"),
     }
+}
+
+/// How far the bar creeps while update_engine says nothing: the share of the
+/// write grows with a time constant of a minute, and stays a tenth of all of
+/// it short so a real number can still move it.
+fn creeping(total: u64, elapsed: Duration) -> u64 {
+    const SHORT_OF: f32 = 0.9;
+    const TIME_CONSTANT: f32 = 60.0;
+    let share = 1.0 - (-(elapsed.as_secs_f32() / TIME_CONSTANT)).exp();
+    let share = share.clamp(0.0, SHORT_OF);
+    (total as f64 * f64::from(share)) as u64
 }
 
 /// Hand each line of `from` to `each` without its line ending, until the
@@ -1138,4 +1156,21 @@ fn pipe(flags: libc::c_int) -> Result<(OwnedFd, OwnedFd)> {
         return Err(io::Error::last_os_error()).context("make a pipe");
     }
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::creeping;
+    use std::time::Duration;
+
+    #[test]
+    fn the_bar_creeps_while_the_engine_says_nothing() {
+        const ALL: u64 = 1 << 30;
+        let short = ALL / 10 * 9;
+        assert_eq!(creeping(ALL, Duration::ZERO), 0, "nothing is written at the start");
+        assert!(creeping(ALL, Duration::from_secs(60)) > ALL / 2, "a minute in, over half");
+        let waited = creeping(ALL, Duration::from_secs(600));
+        assert!(waited <= short, "it stays short of all of it");
+        assert!(waited + 16 >= short, "and close to that short");
+    }
 }
