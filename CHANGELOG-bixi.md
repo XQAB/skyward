@@ -17,7 +17,7 @@
 | 写回失败的机制 | ✅ 已订正 | RO 分区上 `open(O_RDWR)` 不被拒（`count=0` 的 `dd` 能过），拒绝发生在 `write()`；`blockdev --setrw` 用 `O_RDONLY` 就能清旗标，所以「先 open 再 `make_writable`」的顺序本身没问题，1.0.2 的 bug 是 `make_writable(...).unwrap_or(false)` 把 `BLKROGET` 的失败吞了 |
 | `make_writable` 三态 | ✅ 已合 | `Writable::{Already, Cleared, StillReadOnly}`：清完还是只读，不再被当成「本来就可写」 |
 | props 读失败 | ✅ 已合 | 只对 EIO/超时类错误做 200 ms 有界重试（erofs inode 坏是稳定错误，重试只是白等）；About 页一行 `Unreadable{partition,file,error}`，带分区名与文件名 |
-| 安装进度看得见 | ✅ 已实现（待真机验证） | `update_engine` 沉默时条子也往前走：`Stage::Writing` 记下开始写入的时刻，没有引擎数字时取「fuse 已送字节」与 `creeping(total, elapsed)` 的较大者；`creeping` 按 60 s 时间常数向 90% 逼近并封顶，一拿到真实百分比立刻接管。函数放在 `crates/skyward-install/src/creep.rs`，不设 `cfg(target_os = "android")` 门控，四条断言由桌面 `cargo test --workspace` 真跑。此前它写在 `run.rs` 的 `#[cfg(test)]` 里，而 `run` 模块只在 Android 编，桌面测试永远编不到——那是假绿 |
+| 安装进度看得见 | ✅ 已实现（待真机验证） | 比例先取引擎的 `progress` 行，引擎还没说过话时取 fuse 已送字节；两者都经 `along(total, elapsed, counted)` 抬地板——**报过几个数之后再沉默，条子照样按已耗时往前爬**（60 s 时间常数向 90% 逼近并封顶），引擎给的真数字一旦更大就立刻接管，不会把真的 95% 压下去。函数在 `crates/skyward-install/src/creep.rs`，不设 `cfg(target_os = "android")` 门控，八条断言由桌面 `cargo test --workspace` 真跑（含「报过数后沉默不停」与「95% 不被压下」两条）。此前写在 `run.rs` 的 `#[cfg(test)]` 里，桌面测试永远编不到——那是假绿 |
 | 整包会覆盖 `init_boot` | 📌 已知行为 | OTA 直写 boot/init_boot，不走快照；装完 KernelSU 的补丁就没了。重刷 `init_boot_a` / `init_boot_b` 即恢复（本次两槽各 8 MB，`fastboot flash` 均 `OKAY`，`su -v` = `3.3.1:KernelSU`） |
 
 `1.0.4` 的资产：`skyward-v1.0.4-bixi-OS4.0.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
