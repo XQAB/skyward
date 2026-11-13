@@ -652,6 +652,10 @@ fn what_is_left() {
 /// being flashed.
 fn hold(ctx: &Context, current: Slot) -> Result<Option<Kept>> {
     if !ctx.options.keep {
+        // A switch that was left off, or never turned on, keeps nothing: say
+        // so, or a phone whose recovery was written over reads as a recovery
+        // that failed to write itself back.
+        let _ = kmsg("install: keeping this recovery was turned off, so it is not written back");
         return Ok(None);
     }
     let kept = Kept::hold(Path::new(skyward_block::BY_NAME), current).context("hold this recovery from its partition")?;

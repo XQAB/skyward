@@ -196,50 +196,80 @@ pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<&'static str>> {
     Ok(found)
 }
 
-/// Whether the block device behind `file` carries the read-only flag; false
-/// for anything that is not a block device.
-fn read_only(file: &File) -> bool {
+/// Whether the block device behind `file` carries the read-only flag: `None`
+/// for anything that is not a block device, which has no flag to report.
+/// A block device whose flag could not be asked for is an error, rather than
+/// a guess of `false`: taking a failed BLKROGET as "writable already" is what
+/// leaves the flag set and the write that follows refused with `EPERM`.
+fn read_only(file: &File) -> io::Result<Option<bool>> {
     let mut flag: libc::c_int = 0;
     // SAFETY: the handle is open, and BLKROGET (`0x125e`, as `<linux/fs.h>`
     // numbers it) writes one int through the pointer it is given. The number
     // is written out rather than kept as a constant because the two targets
     // this builds for take the request as different types.
-    let asked = unsafe { libc::ioctl(file.as_raw_fd(), 0x125e, &mut flag) };
-    asked == 0 && flag != 0
+    if unsafe { libc::ioctl(file.as_raw_fd(), 0x125e, &mut flag) } != 0 {
+        let e = io::Error::last_os_error();
+        return match e.raw_os_error() {
+            // Not a block device, as the files a test writes to are.
+            Some(libc::ENOTTY) => Ok(None),
+            _ => Err(e),
+        };
+    }
+    Ok(Some(flag != 0))
+}
+
+/// How the read-only flag of a block device stands once `make_writable` has
+/// been through it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Writable {
+    /// It did not carry the flag; nothing was changed.
+    Already,
+    /// It carried the flag, and it is gone now.
+    Cleared,
+    /// It carried the flag, and it is still there after asking the phone to
+    /// clear it: the write that follows will be refused.
+    StillReadOnly,
 }
 
 /// Clear the read-only flag the block device behind `file` carries, as
 /// fastboot does before writing a partition. An install that has just
 /// finished leaves the partitions it wrote refusing writes until this is
 /// done, which is why writing them back fails with `EPERM` otherwise.
-/// `Ok(true)` when the flag was there and is now gone, `Ok(false)` for a
-/// partition that was writable already or is not a block device at all, and
-/// `Err` when the phone refuses to clear it.
-pub fn make_writable(file: &File) -> io::Result<bool> {
-    if !read_only(file) {
-        return Ok(false);
+/// `Err` when the phone refuses to answer for the flag or to clear it, so the
+/// reason reaches the screen instead of one `EPERM` at the write.
+pub fn make_writable(file: &File) -> io::Result<Writable> {
+    match read_only(file)? {
+        None | Some(false) => Ok(Writable::Already),
+        Some(true) => {
+            let clear: libc::c_int = 0;
+            // SAFETY: as in `read_only`, with BLKROSET (`0x125d`) reading the int
+            // it is given: zero clears the flag.
+            if unsafe { libc::ioctl(file.as_raw_fd(), 0x125d, &clear) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            match read_only(file)? {
+                Some(false) => Ok(Writable::Cleared),
+                _ => Ok(Writable::StillReadOnly),
+            }
+        }
     }
-    let clear: libc::c_int = 0;
-    // SAFETY: as in `read_only`, with BLKROSET (`0x125d`) reading the int it is
-    // given: zero clears the flag.
-    if unsafe { libc::ioctl(file.as_raw_fd(), 0x125d, &clear) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(!read_only(file))
 }
 
 /// What a refused write to `path` comes down to, naming the read-only flag
-/// when that is what refused it: `cleared` says whether it was there and was
-/// cleared just before.
-fn refused(path: &Path, cleared: bool, e: io::Error) -> anyhow::Error {
-    match (e.raw_os_error(), cleared) {
-        (Some(libc::EPERM), false) => anyhow!(
-            "write {}: the partition is read-only, as one an update has just written is left",
+/// when that is what refused it, and what the flag was before the write.
+fn refused(path: &Path, writable: Writable, e: io::Error) -> anyhow::Error {
+    match (e.raw_os_error(), writable) {
+        (Some(libc::EPERM), Writable::Already) => anyhow!(
+            "write {}: the partition reports itself writable and still refused the write, as one an update has just written is left",
             path.display()
         ),
-        (Some(libc::EPERM), true) => {
+        (Some(libc::EPERM), Writable::Cleared) => {
             anyhow!("write {}: the partition was made writable and still refused the write", path.display())
         }
+        (Some(libc::EPERM), Writable::StillReadOnly) => anyhow!(
+            "write {}: the partition is still read-only after asking the phone to clear it",
+            path.display()
+        ),
         _ => anyhow!("write {}: {e}", path.display()),
     }
 }
@@ -254,10 +284,10 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
     let mut outs = Vec::with_capacity(devices.len());
     for path in devices {
         let mut f = OpenOptions::new().read(true).write(true).open(path).with_context(|| format!("open {}", path.display()))?;
-        let cleared = make_writable(&f).unwrap_or(false);
+        let writable = make_writable(&f).with_context(|| format!("clear the read-only flag of {}", path.display()))?;
         let size = f.seek(SeekFrom::End(0)).with_context(|| format!("find the size of {}", path.display()))?;
         f.seek(SeekFrom::Start(0)).with_context(|| format!("rewind {}", path.display()))?;
-        outs.push((path, f, size, cleared));
+        outs.push((path, f, size, writable));
     }
     let size = outs[0].2;
     ensure!(outs.iter().all(|(_, _, s, _)| *s == size), "the partition differs in size between slots");
@@ -283,8 +313,8 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
         let n = (end - at).min(CHUNK as u64) as usize;
         source.read_exact(&mut buf[..n]).context("read the image")?;
         written.update(&buf[..n]);
-        for (path, f, _, cleared) in &mut outs {
-            f.write_all(&buf[..n]).map_err(|e| refused(path, *cleared, e))?;
+        for (path, f, _, writable) in &mut outs {
+            f.write_all(&buf[..n]).map_err(|e| refused(path, *writable, e))?;
             done += n as u64;
             progress(done, total);
         }
