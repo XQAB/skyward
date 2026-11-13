@@ -4,3 +4,10 @@
 bixi_extra/**/*.sh text eol=lf
 bixi_extra/**/*.rc text eol=lf
 bixi_extra/**/*.xml text eol=lf
+
+# Keep the sources at LF whatever the checkout was made on.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
