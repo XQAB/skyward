@@ -7,7 +7,7 @@
 use crate::adb::{self, Connection, Offer, Service};
 use crate::asked::Asked;
 use crate::blockmap::BlockMap;
-use crate::creep::creeping;
+use crate::creep::along;
 use crate::ffs::{Endpoints, Shared, Usb};
 use crate::fuse::{self, Fault, LocalFile, Mount};
 use crate::image::{self, ImageKind};
@@ -778,9 +778,10 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
     // the screen shows a share of the package written by; the bytes the
     // filesystem served say the same before it says anything.
     let mut engine: Option<u16> = None;
-    // When the engine says nothing for a while, the bar still moves: it
-    // creeps by how long this write has been going, and stops short of all
-    // of it so a real number can still take over.
+    // The engine's own numbers are what the bar follows, but it can go quiet
+    // after any of them, so how far this write has been going is kept as a
+    // floor: the bar creeps on by time, and stops short of all of it so the
+    // engine's real number always wins once it says one.
     let started = Instant::now();
     loop {
         match rx.recv_timeout(PROGRESS_EVERY) {
@@ -799,13 +800,16 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
         } else if let Some((index, partition)) = &verifying {
             Stage::Verifying { index: *index, count: partitions.max(index + 1), partition: partition.clone() }
         } else {
-            let done = match engine {
+            // The engine's own number once it has said one, the bytes the
+            // filesystem served before that — and either way never behind
+            // how long this write has been going, because the engine can go
+            // quiet after any number it says and the bar has to keep moving
+            // through that silence too.
+            let counted = match engine {
                 Some(thousandths) => total / 1000 * u64::from(thousandths),
-                None => {
-                    let served = mount.served().saturating_sub(update.payload_offset).min(total);
-                    served.max(creeping(total, started.elapsed()))
-                }
+                None => mount.served().saturating_sub(update.payload_offset).min(total),
             };
+            let done = along(total, started.elapsed(), counted);
             Stage::Writing { done, total }
         };
         let moved_on = std::mem::discriminant(&now) != std::mem::discriminant(&stage);
