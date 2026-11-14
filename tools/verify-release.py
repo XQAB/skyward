@@ -320,6 +320,11 @@ def verify(image, config, extra, version, manifest):
     stock = settings.get("stock", {}).get("version")
     codename = settings.get("device", {}).get("codename", device)
 
+    # What this image is held against is said before anything is checked
+    # against it: a report that goes on to disagree reads as the stock build
+    # having moved, rather than as the packing having gone wrong.
+    report.ok("stock build", f"{stock}, from {config}" if stock else "no stock build named in the config")
+
     data = Path(image).read_bytes()
     report.ok("image size", f"{len(data)} bytes")
 
