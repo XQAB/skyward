@@ -3498,9 +3498,15 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         // waited on: a network that answers slowly holds the
                         // request for as long as its timeouts allow, and the
                         // address just typed would otherwise go unanswered
-                        // until the old one gave up.
+                        // until the old one gave up. It is let go on its own
+                        // thread as well, because a worker's drop waits for
+                        // its thread: the loop itself must not.
                         if let Some(reading) = browser_reader.take() {
                             reading.stop();
+                            std::thread::Builder::new()
+                                .name("browser-read-let-go".into())
+                                .spawn(move || drop(reading))
+                                .context("let the page read in flight go")?;
                         }
                         skyward_sys::kmsg(&format!("reading {url} as a page"))?;
                         browser_reader = Some(updates::Worker::start(updates::Task::Browse { url }, servers.clone())?);
