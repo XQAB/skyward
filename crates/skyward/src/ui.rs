@@ -3433,6 +3433,18 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         skyward_updater = Some(updates::Worker::start(task, servers.clone())?);
                     }
                     Effect::StopSkywardUpdate => skyward_updater.as_ref().context("Skyward is not being updated")?.stop(),
+                    // A build kept in a place the user picked goes into the
+                    // recovery partitions the way a downloaded one does: its
+                    // image is checked for this phone first, and it stays
+                    // where it is afterwards.
+                    Effect::WriteSkyward(place, path) => {
+                        ensure!(skyward_updater.is_none(), "Skyward is being updated already");
+                        ensure!(installer.is_none(), "an installer is running already");
+                        let file = in_place(place, &path);
+                        skyward_sys::kmsg(&format!("writing the Skyward build at {}", file.display()))?;
+                        let task = updates::Task::Write { path: file, codename: cfg.device.codename.clone() };
+                        skyward_updater = Some(updates::Worker::start(task, servers.clone())?);
+                    }
                     // A slice of the build the next update would download is
                     // asked of each mirror, in the order the pages list them;
                     // the quickest becomes the one the update goes through.

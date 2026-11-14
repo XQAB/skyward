@@ -3062,6 +3062,22 @@ pub fn skyward_update(cx: &Ctx) -> Frame {
         Some(_) if !s.updating_skyward() => weigh_mirrors(&mut c, cx, y + t.m.card_gap, &mut out),
         _ => y,
     };
+    // A build kept in a place goes into the recovery partitions the same
+    // way, without GitHub and without a download.
+    if s.recovery_partitions {
+        let (note, action) = if s.data.storage_open() {
+            (None, Action::Open(Screen::Choose(Place::Storage)))
+        } else if matches!(s.data, Data::Erased) {
+            (Some(l.pick(DATA_ERASED)), Action::Open(Screen::Decrypt))
+        } else {
+            (Some(l.pick(DECRYPT_NEEDED)), Action::Open(Screen::Decrypt))
+        };
+        let row = Row::new(l.pick(KEPT_BUILD)).icon(BLUE, Icon::Phone);
+        let row = note.map_or(row, |note| row.subtitle(note));
+        let kept = widgets::list(&mut c, t, f, y + t.m.card_gap, &[row]);
+        out.extend(hits(&kept.rows, &[action]));
+        y = kept.bottom;
+    }
     let points = [
         l.pick([
             "新版本从 GitHub 下载，校验 SHA-256 后写入 recovery 分区，不会改动系统和用户数据。",
@@ -3226,6 +3242,7 @@ fn weigh_mirrors(c: &mut Canvas, cx: &Ctx, y: f32, out: &mut Vec<Hit>) -> f32 {
 
 const WEIGH: Text = ["测速选出最快的镜像", "測速選出最快的鏡像", "Time the mirrors and take the quickest"];
 const WEIGHING: Text = ["正在测速…", "正在測速…", "Timing the mirrors…"];
+const KEPT_BUILD: Text = ["从内部存储刷入镜像", "從內部儲存空間刷入映像檔", "Write a build kept in internal storage"];
 
 /// The WLAN switch; then the network chosen and how joining it goes, and
 /// the networks in range, strongest first.

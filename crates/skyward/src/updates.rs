@@ -61,6 +61,10 @@ pub enum Task {
     /// it are asked of each one, and what came of it is how fast that one
     /// is on this network.
     Weigh { link: String, mirrors: Vec<String>, sample: u64 },
+    /// Write the Skyward build kept at `path` into the recovery partitions,
+    /// checked as Skyward for the phone `codename` names first: the build
+    /// was not downloaded here, but goes in the same way.
+    Write { path: PathBuf, codename: String },
 }
 
 pub enum Event {
@@ -228,6 +232,12 @@ impl Worker {
                         let mut refused = |_a: &ureq::Agent| Again::Retry;
                         let end = fetch(&servers, vec![url.clone()], &Sum::Unchecked, &name, &path, &stopping, &using, &tell, &mut refused);
                         tell(Event::Ended(end));
+                    }
+                    // The build was not downloaded here: it is kept in a place
+                    // the user chose, and its image is checked to be Skyward
+                    // for this phone before anything goes in.
+                    Task::Write { path, codename } => {
+                        tell(Event::Ended(write(&path, &codename, &tell)));
                     }
                     // Each mirror is asked for a slice of the build the next
                     // update would download, one after another, and none of

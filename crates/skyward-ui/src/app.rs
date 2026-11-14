@@ -278,6 +278,10 @@ pub const DATA_OPENING: Text = ["正在打开 data 分区，请稍后再试", "�
 /// What an install is told while the last one has not ended.
 pub const INSTALL_UNFINISHED: Text = ["上一次安装尚未结束，请稍后再试", "上一次安裝尚未結束，請稍後再試", "The last install hasn't ended. Try again shortly"];
 
+/// What a build kept in a place is told while Skyward is being updated
+/// already.
+const SKYWARD_UNFINISHED: Text = ["Skyward 正在更新，请稍后再试", "Skyward 正在更新，請稍後再試", "Skyward is being updated. Try again shortly"];
+
 /// What work on the data partition is told once it has been erased whole.
 pub const DATA_ERASED: Text = ["data 分区已清除", "data 分割區已清除", "The data partition was wiped"];
 
@@ -984,6 +988,12 @@ pub(crate) fn installs(e: &FileRow) -> bool {
 /// The last part of `path`, as the installing page names the file there.
 fn file_name(path: &str) -> Option<String> {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned())
+}
+
+/// Whether `name` is what Skyward calls the build it publishes, a bare image
+/// or the zip it comes in: `skyward-v1.0.6-bixi-OS4.0.0.11.XOHCNXM.img`.
+fn is_skyward_build(name: Option<&str>) -> bool {
+    name.is_some_and(|n| n.starts_with("skyward-") && (n.ends_with(".img") || n.ends_with(".zip")))
 }
 
 /// A partition the mount page lists: its name, where it sits, and how it
@@ -2573,6 +2583,10 @@ pub enum Effect {
     /// [`App::skyward_ended`].
     UpdateSkyward(Build),
     StopSkywardUpdate,
+    /// Write the Skyward build kept at `path` in `place` into the recovery
+    /// partitions, telling how it goes with [`App::skyward_progress`] and
+    /// [`App::skyward_ended`].
+    WriteSkyward(Place, String),
     /// Time each of `MIRRORS` against `link`, the build the next update
     /// would download, telling the rates with [`App::mirrors_weighed`].
     WeighMirrors(String),
@@ -6584,7 +6598,31 @@ impl App {
     /// following how it goes; one install at a time.
     fn install_file(&mut self, place: Place, path: String, size: u64, now: u64) -> Vec<Effect> {
         let name = file_name(&path);
+        // A Skyward build kept in a place goes into the recovery partitions
+        // the way the page's own update does; the installer would take it for
+        // a boot image and write one slot only.
+        if is_skyward_build(name.as_deref()) {
+            return self.write_skyward(place, path, now);
+        }
         self.install_named(Source::File(place), name, size, Effect::InstallFile(place, path), now)
+    }
+
+    /// Write the Skyward build kept at `path` in `place` into the recovery
+    /// partitions of both slots, its page following how it goes: one update
+    /// at a time, and none while an install is under way.
+    fn write_skyward(&mut self, place: Place, path: String, now: u64) -> Vec<Effect> {
+        if !matches!(self.state.install, Install::Idle | Install::Finished { .. }) {
+            self.say(self.state.lang.pick(INSTALL_UNFINISHED), now);
+            return Vec::new();
+        }
+        if self.state.updating_skyward() {
+            self.say(self.state.lang.pick(SKYWARD_UNFINISHED), now);
+            return Vec::new();
+        }
+        self.state.skyward_job = Some(SkywardJob { stage: None, rate: 0, outcome: None, stopping: false });
+        self.open(Screen::SkywardUpdate);
+        self.refresh();
+        vec![Effect::WriteSkyward(place, path)]
     }
 
     /// Install the file of `size` bytes at the full `path`, opened in the
@@ -11939,6 +11977,29 @@ mod tests {
         assert_eq!(app.state.mirror, 2, "none answering leaves the one chosen as it was");
         app.skyward_checked(Ok(skyward_newest(false)));
         assert!(!app.frame(&f, &i).hits.iter().any(|h| h.action == Action::WeighMirrors), "nothing to time without a build");
+    }
+
+    #[test]
+    fn a_skyward_build_kept_in_storage_goes_into_the_recovery_partitions() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Install, W, H, PPD);
+        app.state.recovery_partitions = true;
+        let path = "shuaji/skyward-v1.0.6-bixi-OS4.0.0.11.XOHCNXM.img".to_string();
+        let size = 104_857_600;
+        assert_eq!(
+            app.install_file(Place::Storage, path.clone(), size, 0),
+            vec![Effect::WriteSkyward(Place::Storage, path.clone())],
+            "a Skyward build goes into the recovery partitions, not the installer"
+        );
+        assert_eq!(app.screen(), Screen::SkywardUpdate, "its page shows how it goes");
+        assert!(app.state.updating_skyward(), "one update at a time");
+        assert!(app.install_file(Place::Storage, path.clone(), size, 100).is_empty(), "a second waits for the first");
+        app.skyward_ended(SkywardEnd::Updated(vec![Slot::A, Slot::B]), 200);
+        assert_eq!(
+            app.install_file(Place::Storage, "Download/rom.zip".into(), 1 << 30, 300),
+            vec![Effect::InstallFile(Place::Storage, "Download/rom.zip".into())],
+            "anything else installs as before"
+        );
     }
 
     #[test]
