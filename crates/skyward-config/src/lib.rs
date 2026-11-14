@@ -245,7 +245,8 @@ pub struct Haptics {
 
 /// How strongly the click plays, each as a share of the most its waveform
 /// drives the motor with. The strength slider goes from the lightest to the
-/// strongest, each step the same factor stronger.
+/// strongest in equal steps of the throw rather than the same factor, which
+/// is what a finger reads as a heavier click.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct Strength {
     pub lightest: f32,

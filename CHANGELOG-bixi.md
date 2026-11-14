@@ -1,7 +1,22 @@
-# Skyward for bixi · 1.0.5
+# Skyward for bixi · 1.0.6
 
 > 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
+
+## 1.0.6
+
+1.0.5 让文件页能搜能排，这一版只动一下点击的手感：从「嗡」变成「嗒」，并且一下比一下重。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| 点击是「嗒」，不是「嗡」 | ✅ 已实现（待真机验证） | 移植 haotian `b5ff5344`＋`45a1a155`＋`68afec53` 的思路，按本 fork 的路线重做：haotian 是把正弦当 `FF_SINE` 周期效果交给驱动、包络写在 `ff_envelope` 里；本 fork 是自己造采样走 `FF_CUSTOM`，所以包络直接乘在样本上。一次点击从固定的 3.5 摆（约 20 ms）改成**跟着滑条 12→26 ms**：起头 1 ms 升到设定强度，末尾按长度的五分之二收回去，驱动摆 2 → 刹车 1.5 的比例没动。摆完了收回去，才是一下，而不是一阵 |
+| 长度也带滑条 | ✅ 已实现（待真机验证） | 手指读的「多重」是拿到了多少摆动，所以 `click(position)` 现在同时给出强度与长度：`share()` 走 `click::share`（等步进），长度走 `click::length_of`（`LIGHT_CLICK_MS = 12` / `HEAVY_CLICK_MS = 26`）。`FF_CUSTOM` 的样本按每次点击的强度与长度现造，长度由样本数与采样率决定，`probe`、界面点击、设置页试听走的都是同一条 |
+| 滑条等步进 | ✅ 已改 | 原来的 `share()` 是每格同一个倍数（每格同样分贝），手指读不出深浅；改成 `lightest + (strongest - lightest) * at`，每十分之一滑条是同样一点摆幅。`skyward-config` 的 `Strength` 文档同步改过 |
+| 样本数学抽到桌面侧 | ✅ 已改 | 新 `crates/skyward-ui/src/click.rs`（`RATE`、`DRIVE_SWINGS`／`BRAKE_SWINGS`、`share`、`length_of`、`fade_of`、`made`、`envelope`），四条断言由桌面 `cargo test --workspace` 真跑：长度 12→26 单调、包络 8 样本升／56 样本落装得进 19 ms、驱动摆到满幅后翻向刹车、滑条等步进（每格 0.075）。这些原来全在 `crates/skyward/src/haptics.rs` 的 `#[cfg(test)]` 里，而 `haptics` 模块本身是 `#[cfg(target_os = "android")]`，桌面编不到——和 `creep.rs` 之前那次一样的假绿 |
+
+`bixi` 的强度上限这次**没有提高**，仍是 `devices/bixi.toml` 的 `strength = { lightest = 0.25, strongest = 0.75 }`。haotian 把它抬到 `0.4 ~ 1.0` 是因为他那台机器两端都嫌弱；bixi 是 `qcom-hv-haptics`，满幅会不会打颤没验过，等真机试完再决定抬不抬。
+
+`crates/skyward-ui` 的 `click.rs` 随桌面测试跑；`crates/skyward` 的 `haptics.rs` 改动仍靠 `cargo ndk clippy` 看编译、靠真机看手感——本机没有 Android 目标可编。
 
 ## 1.0.5
 
