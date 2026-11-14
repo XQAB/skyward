@@ -20,6 +20,9 @@
 | `Alittlejelly/skyward-for-MI10` | `main` / `42afe684` | 4.19 上重编 WLAN 驱动的一串兼容补丁 |
 | `XuexGao/skyward` | `main` / `6f399fb4` | oppo 的 HIDL 服务目录与 binder 节点、`hwservicemanager` 从已装系统起 |
 | `FireMapleHyper/skyward-firemaplehyper` | `main` / `ff1668fd` | 双系统的安装/切换/启动集恢复，以及文案 |
+| `mariusarva/skyward-pudding` | `main`（基于上游 v0.2.0，迭代到 v0.2.52） | 小米 17（pudding）的 A/B 双槽适配：分区末尾补 AVB、gatekeeper blob 绑 weaver、补 boot control 服务、模块共用已加载集合、WLAN 自动连接与记住密码、触摸等待放宽 |
+| `echoskies-works/skyward-extra` | `main`（活跃到 11-13） | 截图、banner 重绘、桌面模式、时钟/计时器页，以及「正在写的页面不因返回而放弃」 |
+
 
 ## 一、值得搬
 
@@ -110,7 +113,53 @@ stock 比对的，再往下才是逐项检查。
 与 sha256，以及 Windows 上要靠 WSL 的那几句。
 
 
-## 二、不适用 bixi
+### 11. 分区末尾补 AVB 结构（解不开 data 时先查布局）
+
+来源 `mariusarva/skyward-pudding` 的 README（pudding 与 bixi 处境相近：上游同样把
+它列在「施工中」、不解密，同样是 A/B 双槽）。它遇到的第一个坑不是密钥链，而是
+**分区末尾没有 AVB 结构**：改成在原厂布局的位置补 AVB0（4096 对齐处、512 字节）
+与 AVBf（分区末 64 字节），摘要取 `SHA256(镜像[0:L])`。
+
+对我们的用法：bixi 若哪天出现「data 解不开」，**先按这条查布局，别一头扎进
+密钥链**（issue #2 就是密钥链那条路）。我们的 `skyward-vab` 已经在读 AVB 页，
+可以对照它的布局假设核一遍。
+
+### 12. gatekeeper 绑定的 blob（换 weaver 之前先读）
+
+来源同上。它记的口径是：用户 secret 绑在 Thales weaver 上、recovery 里解不开时，
+**记录的保护者绑 weaver，就改用同目录带 `.secdis` + `.pwd` 的 gatekeeper 绑定
+blob**。
+
+这条跟 issue #2 是一体两面：我们打算把「从序列号派生」换成 weaver 硬件绑定，
+换完 recovery 侧还能不能解，取决于它怎么读 gatekeeper blob。**先读它的做法，
+再动手改密钥**（issue #2 的方案就是按这个顺序写的）。
+
+### 13. 内核模块跨请求共用一个「已加载」集合
+
+来源同上。它的坑是共享依赖的内核模块被 `insmod` 两次。我们双系统要加载另一套
+模块时，第二次 `insmod` 会踩同一个问题：`skyward-modules` 该跨请求记住已经加载
+过的名字，而不是每次从头装。
+
+### 14. WLAN 起不来的重试与「记住密码」
+
+来源同上。它实测「开 WLAN 到联网 19.4 秒降到 12.5 秒」，做法是：先等驱动建出
+`/sys/class/net/wlan0` 再应答 ioctl，中间撞 `ENODEV` 就重试，整条起不来自动重开
+最多 3 次；密码明文存 `/metadata/skyward/wlan`（0600）。我们 v1.0.5 的自连可以
+对照这两处：重试次数与「等节点出现再说话」。
+
+### 15. 触摸等待放宽到 10 秒
+
+来源同上。面板后到会自己恢复触摸，等 10 秒再判定「没有面板」，不再误判。bixi
+若偶尔报没面板，这一条就是原因。我们 `[touch]` 的等待值可以对一下。
+
+### 16. 「正在写的页面不因返回而放弃」
+
+来源 `echoskies-works/skyward-extra`（提交信息原文 `Leave a page that is writing
+where it is, as going back does`）。这正是我们在 `Effect::OpenPage` 上刚修的那件
+事：一次读在飞的时候，下一次读不该被拒，也不该被页面返回打断。它还有截图、
+banner 重绘、桌面模式、时钟/计时器页——桌面模式（把页面从桌面打开）我们没有，
+bixi 也没有外接显示器的场景，先记着不搬。
+
 
 - **4.19 内核的两段式 loop device**：`Max1937/skyward-a57` `f2828a52`、`f9f75f58`。bixi 是 SM8750 的新内核，不需要按 4.19 的答法绑 loop。
 - **自编内核 + prima WLAN 的 config fragment**：`Max1937` `880b0259`、`fd2d1432`、`3fc5dac7`。我们跟 stock 内核与它自己的模块走，不走重编内核这条路。
@@ -118,6 +167,18 @@ stock 比对的，再往下才是逐项检查。
 - **oppo 的 HIDL 服务目录与 binder 节点**：`XuexGao/skyward` `6f399fb4`、`b2cd25f7`、`9152e023`。服务链是机型自己的，bixi 是小米 OS4，搬不过去。
 - **放宽 weaver 服务名识别**：`ChuiShui233` `6689a436`。bixi 的服务名已确定；放宽只会把不该匹配的也匹上。（同一提交里「更新页机型属性名配置化」这一小点可另看，我们的 Specs 页也读机型属性。）
 - **双系统的实现与文案**：`FireMapleHyper` `ff7655e2`、`2d2caa1b`、`1b3fa6ea`、`83cdf6f9`。我们自己的 `Screen::Systems` 已经能做装/切/删，只借它「切换前先把要保留那套的启动集写回」的次序。
+- **pudding 的 `patches/` 不能直接打**：`mariusarva/skyward-pudding` 的补丁是相对
+  上游 v0.2.0 的，我们在 v0.3.1 上重建过（`28a34829`），只能读代码挑逻辑，不能
+  `git apply`。
+- **pudding 的「补第六条 boot control 服务」我们不缺**：它原本没起
+  `android.hardware.boot-service.qti`，所以「下次启动」读不到、也切不了槽。
+  bixi 的 `devices/bixi.toml` 最后一条 service 就是它
+  （`ready_service = android.hardware.boot.IBootControl/default`，root），
+  `crates/skyward-vab/src/boot.rs` 也是走这个 HAL。要确认的是它**能不能起来**，
+  不是要不要补——界面在它没起来时会直接说
+  「…is not running; the phone's boot control has to be started first」。
+- **桌面模式 / 截图 / banner**：`echoskies-works/skyward-extra` 这几项要外接显示器
+  或桌面概念，bixi 没有这个场景。
 - **super 整包直刷**：`haotian` 0.3.2 文档里的「super 镜像整包直刷：先 discard、4 MiB 一次写、三个窗口读回校验」。风险高，且 bixi 走 A/B 整包，不做。
 - **上游 0.3.1 的三件事（omapi 服务、按系统分区起 keymint 的 programs、recovery 自己的对象注册进 servicemanager）**：面向「密钥槽在安全元件里」的机型（haotian）。bixi 的解锁链是 weaver + 序列号派生（见 issue #2），不需要 eSE 通道。
 
@@ -138,6 +199,10 @@ stock 比对的，再往下才是逐项检查。
 ## 四、扫描口径（便于下次复查）
 
 - fork 列表：`GET /repos/kirklin/skyward/forks?sort=newest&per_page=40`；
+- **还要走一遍仓库搜索**：`GET /search/repositories?q=skyward+fork:true&per_page=100`
+  （翻页到全）。它扫到的比 fork 列表多——fork 的 fork、改过名的、以及二次分叉
+  （`mariusarva/skyward-pudding`、`echoskies-works/skyward-extra` 这两个就是这样
+  找到的，都不在 40 个直接 fork 里）。两条路都走，再按「有没有自己的提交」筛；
 - 有没有自己的提交：取每个 fork 的 `GET /repos/{fork}/commits?per_page=8`，与
   **上游客栈的最近八个提交**（`c5e09f6e` / `cc68936f` / `bd34c054` / `b6965423`
   / `684a2f43` / `0b4ee3ec` / `e5f3cf0c` / `31f3978a`）比对，全在这些里面就是

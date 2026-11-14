@@ -45,6 +45,30 @@ init_boot.img   可选：系统自带 first-stage ramdisk 时才有
 6. **空间**：`room()` 已经扣掉一份 `super`，但 bixi 的 `super` 不小；先看 `/data` 实际剩余，
    最小 8 GB 起，选中之后安装会按块对齐。
 
+### 4.1 切换靠哪根线：boot control（配置里已经有）
+
+「切槽」这个动作不是直接写 `misc`，而是走
+`android.hardware.boot.IBootControl/default`（`crates/skyward-vab/src/boot.rs`，
+`skyward/src/systems.rs`、`merge.rs`、`ui.rs` 都从它开）。
+
+`devices/bixi.toml` 的最后一条 service 就是它：
+
+```toml
+[[service]]
+path = "/vendor/bin/hw/android.hardware.boot-service.qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.boot.IBootControl/default"
+user = "root"
+```
+
+所以真机前要确认的是**它能不能起来**，不是「要不要补这个服务」——
+`mariusarva/skyward-pudding` 原本缺这一条，补上之后「下次启动」才读得到、
+槽才切得动。我们这边若它没起来，界面会直接显示
+「…is not running; the phone's boot control has to be started first」
+（`crates/skyward-preview/src/main.rs:899` 就是这条文案的样本），
+而不是悄悄切错槽。真机验的时候先看这一句在不在。
+
+
 ## 5. 切换与回退
 
 - 入口：首页「双系统」；切换只改写下次启动槽位的 `boot` / `init_boot`；
