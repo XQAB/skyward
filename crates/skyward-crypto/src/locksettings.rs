@@ -68,8 +68,8 @@ impl Scratch {
         let number = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("skyward-locksettings-{}-{number}", std::process::id()));
         std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-        let database = dir.join("locksettings.db");
-        let scratch = Scratch { dir, database };
+        let at = dir.join("locksettings.db");
+        let scratch = Scratch { dir, database: at };
         std::fs::copy(database, &scratch.database)
             .with_context(|| format!("copy {} to {}", database.display(), scratch.database.display()))?;
         for suffix in ["-wal", "-shm"] {
