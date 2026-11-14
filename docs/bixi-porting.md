@@ -110,12 +110,17 @@
 
 ## 6. 安全：凭据存储与密钥派生（⚠️ 待加固）
 
-- 打开 `/data` 的密码被 **AES-GCM 加密**后存于 `/metadata/skyward/credential`，
-  密钥**从手机序列号派生**。
-- 该密钥**非硬件绑定**、有一定可预测性，对一台自称「daily driver」的设备而言偏弱。
-- 更稳妥的方向：改用已拉通的 **weaver** 做 hardare-bound 凭据，或在 TEE 内派生。
+- 打开 `/data` 的密码被 **AES-GCM 加密**后存于 `/metadata/skyward/credential`，密钥**从手机序列号派生**
+  （`SHA-256("skyward credential v1|" + ro.serialno + "|" + salt)`）。序列号在 adb 与 fastboot 下都能读，
+  所以换一台手机打不开，但**拿到这台手机的人能打开**——它是标记，不是边界。
+- 「改用已拉通的 **weaver** 做 hardware-bound」这条**不成立**：本 fork 的 weaver 客户端只有
+  `getConfig` 与 `read`（槽位里的 value 是用户注册时由 framework 写入的，recovery 只能拿 key 换 value，
+  没有 seal / unseal），而读它用的 key 又必须从用户已知的锁屏密码派生——循环。
+  评估与三条可行路线见 [`credential-hardening.md`](credential-hardening.md)。
+- 结论方向：**默认不落盘**（开关默认关）+ 打开时把风险写在文案里 + 升级后第一次成功解密就删掉旧文件。
+  改动面约 80 行，真机一轮；在实施前，请勿假定 `credential` 能抵抗具备序列号读取能力的攻击者。
 
-> **状态：TODO**。在加固完成前，请勿假定 `credential` 能抵抗具备序列号读取能力的攻击者。
+> **状态：评估已定稿，实现未开始 —— 见 `credential-hardening.md`。**
 
 ---
 
