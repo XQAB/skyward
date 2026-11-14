@@ -553,7 +553,7 @@ fn disposition_name(response: &ureq::http::Response<ureq::Body>) -> Option<Strin
         if let Some(rest) = part.strip_prefix("filename=") {
             let name = rest.trim().trim_matches('"');
             if !name.is_empty() {
-                fallback = Some(sanitize_name(&name));
+                fallback = Some(sanitize_name(name));
             }
         }
     }
