@@ -3494,7 +3494,14 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     // where its links go, and a file it turns out to be goes
                     // to the download page.
                     Effect::OpenPage(url) => {
-                        ensure!(browser_reader.is_none(), "a page is being read already");
+                        // A read already in flight is cut first rather than
+                        // waited on: a network that answers slowly holds the
+                        // request for as long as its timeouts allow, and the
+                        // address just typed would otherwise go unanswered
+                        // until the old one gave up.
+                        if let Some(reading) = browser_reader.take() {
+                            reading.stop();
+                        }
                         skyward_sys::kmsg(&format!("reading {url} as a page"))?;
                         browser_reader = Some(updates::Worker::start(updates::Task::Browse { url }, servers.clone())?);
                     }
