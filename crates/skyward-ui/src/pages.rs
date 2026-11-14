@@ -298,14 +298,14 @@ pub fn home(cx: &Ctx) -> Frame {
     let none = l.pick(["未知", "未知", "Unknown"]);
     let stats = [
         Spec {
-            icon: Outline::Power,
+            icon: Outline::Tag,
             label: l.pick(SLOT_STAT),
             value: match i.slot {
                 Some(slot) => fmt::slots(l, &[slot]),
                 None => none.to_string(),
             },
         },
-        Spec { icon: Outline::Lock, label: l.pick(DATA_STAT), value: fmt::data(l, &cx.state.data).to_string() },
+        Spec { icon: Outline::Shield, label: l.pick(DATA_STAT), value: fmt::data(l, &cx.state.data).to_string() },
         Spec { icon: Outline::Storage, label: l.pick(FREE_STAT), value: free },
         Spec {
             icon: Outline::Battery,
