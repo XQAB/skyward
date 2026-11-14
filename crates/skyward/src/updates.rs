@@ -9,6 +9,7 @@ use skyward_install::upgrade;
 use skyward_net::download::{self, Damaged, Failure, NoRoom, Progress, Refused, Sum};
 use skyward_net::github::{self, Build, Newest};
 use skyward_net::http::{self, Servers};
+use skyward_net::mirror;
 use skyward_net::reach::{self, Reach};
 use skyward_net::release::{self, Installed, Release, Unanswered};
 use skyward_vab::Slot;
@@ -55,6 +56,11 @@ pub enum Task {
     /// Ask `url`'s server what time it keeps: the clock the recovery
     /// started with is the phone's own, and the network has the right one.
     SyncTime { url: String },
+    /// Time each of `mirrors`, in the order the pages list them, against
+    /// `link`, the build the next update would download: `sample` bytes of
+    /// it are asked of each one, and what came of it is how fast that one
+    /// is on this network.
+    Weigh { link: String, mirrors: Vec<String>, sample: u64 },
 }
 
 pub enum Event {
@@ -70,6 +76,10 @@ pub enum Event {
     /// Skyward's build is written into the recovery partitions and read
     /// back: bytes so far, of all.
     Writing { done: u64, total: u64 },
+    /// How fast each mirror gave the build the next update would download,
+    /// in bytes a second, as its place in the list asked; zero where it gave
+    /// none.
+    Weighed(Vec<u64>),
     Ended(End),
 }
 
@@ -218,6 +228,24 @@ impl Worker {
                         let mut refused = |_a: &ureq::Agent| Again::Retry;
                         let end = fetch(&servers, vec![url.clone()], &Sum::Unchecked, &name, &path, &stopping, &using, &tell, &mut refused);
                         tell(Event::Ended(end));
+                    }
+                    // Each mirror is asked for a slice of the build the next
+                    // update would download, one after another, and none of
+                    // it is kept: what came of each is how fast it is here.
+                    Task::Weigh { link, mirrors, sample } => {
+                        let a = http::agent(servers.clone());
+                        *using.lock().expect("the agent is not held by a thread that panicked") = Some(a.clone());
+                        let mut rates = Vec::with_capacity(mirrors.len());
+                        for through in &mirrors {
+                            let url = format!("{through}{link}");
+                            let rate = mirror::rate(&a, &url, sample, mirror::STALL)
+                                .inspect_err(|e| {
+                                    let _ = skyward_sys::kmsg(&format!("timing {url}: {e:#}"));
+                                })
+                                .unwrap_or(0);
+                            rates.push(rate);
+                        }
+                        tell(Event::Weighed(rates));
                     }
                     // Nothing is written here: the answer is the time, and
                     // whoever asked it sets the phone's clock.

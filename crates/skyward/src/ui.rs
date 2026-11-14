@@ -1872,6 +1872,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // Asking GitHub for Skyward's newest release, and updating to it.
     let mut skyward_checker: Option<updates::Worker> = None;
     let mut skyward_updater: Option<updates::Worker> = None;
+    // Timing the mirrors against the build the next update would download.
+    let mut weigher: Option<updates::Worker> = None;
     // Taking the file an address typed on the download page holds.
     let mut fetcher: Option<updates::Worker> = None;
     // The phone sleeps while its screen is off and nothing needs it awake.
@@ -2162,6 +2164,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
             || downloader.is_some()
             || skyward_checker.is_some()
             || skyward_updater.is_some()
+            || weigher.is_some()
             || systems_busy;
         let joining = app.state.wlan.as_ref().and_then(|w| w.joined.as_ref()).is_some_and(|j| matches!(j.stage, Joining::Joining | Joining::Addressing));
         let running = match &shell {
@@ -2673,7 +2676,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.download_ended(end, have(&app, &release), now);
                         fetched = true;
                     }
-                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) => {
+                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) | updates::Event::Weighed(_) => {
                         unreachable!("a download asks nothing of its own, and writes nothing")
                     }
                 }
@@ -2713,12 +2716,24 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.skyward_ended(end, now);
                         updated = true;
                     }
-                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Timed(_) => unreachable!("an update asks nothing of its own"),
+                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Timed(_) | updates::Event::Weighed(_) => unreachable!("an update asks nothing of its own"),
                 }
             }
         }
         if updated {
             skyward_updater = None;
+        }
+        let mut weighed = false;
+        if let Some(w) = &weigher {
+            for ev in w.events() {
+                let updates::Event::Weighed(rates) = ev else { unreachable!("timing the mirrors writes nothing") };
+                skyward_sys::kmsg(&format!("what each mirror gave, in bytes a second: {rates:?}"))?;
+                app.mirrors_weighed(rates);
+                weighed = true;
+            }
+        }
+        if weighed {
+            weigher = None;
         }
         let mut taken = false;
         if let Some(t) = &fetcher {
@@ -2738,7 +2753,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.fetch_ended(end, now);
                         taken = true;
                     }
-                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) => {
+                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) | updates::Event::Weighed(_) => {
                         unreachable!("taking a file from an address asks nothing, and writes nothing")
                     }
                 }
@@ -3418,6 +3433,16 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         skyward_updater = Some(updates::Worker::start(task, servers.clone())?);
                     }
                     Effect::StopSkywardUpdate => skyward_updater.as_ref().context("Skyward is not being updated")?.stop(),
+                    // A slice of the build the next update would download is
+                    // asked of each mirror, in the order the pages list them;
+                    // the quickest becomes the one the update goes through.
+                    Effect::WeighMirrors(link) => {
+                        ensure!(weigher.is_none(), "the mirrors are being timed already");
+                        skyward_sys::kmsg(&format!("timing the mirrors against {link}"))?;
+                        let mirrors = skyward_ui::app::MIRRORS.iter().map(|m| (*m).to_string()).collect();
+                        let task = updates::Task::Weigh { link, mirrors, sample: skyward_net::mirror::SAMPLE };
+                        weigher = Some(updates::Worker::start(task, servers.clone())?);
+                    }
                     // What an address holds goes into internal storage's
                     // Download folder, under the last part of the address.
                     Effect::FetchUrl(url) => {

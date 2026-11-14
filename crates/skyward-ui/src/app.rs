@@ -23,6 +23,7 @@ use skyward_info::DeviceInfo;
 use skyward_install::{Event, ImageKind, Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::{Failure, Progress};
 use skyward_net::github::{Build, Newest};
+use skyward_net::mirror;
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Joined, Network, Power, Stage as Joining, Traffic, Wlan};
@@ -203,6 +204,18 @@ pub enum SkywardCheck {
     Asking,
     Failed(Unanswered),
     Answered(Newest),
+}
+
+/// Timing the mirrors against the build the next update would download, as
+/// the page shows it: how far that has come, and what each one gave.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Weighing {
+    #[default]
+    Idle,
+    Asking,
+    /// Bytes a second each mirror gave, as its place in [`MIRRORS`]; zero
+    /// where it gave none.
+    Weighed(Vec<u64>),
 }
 
 /// Updating Skyward, as its page shows it: downloading the newest release's
@@ -1520,6 +1533,9 @@ pub enum Action {
     UpdateSkyward,
     /// Stop downloading the build.
     StopSkywardUpdate,
+    /// Time each mirror against the build the next update would download,
+    /// and take the quickest of them as the one the pages go through.
+    WeighMirrors,
     /// Take what the address typed on the download page holds.
     Fetch,
     /// Stop taking it.
@@ -2129,6 +2145,9 @@ pub struct State {
     pub skyward_check: SkywardCheck,
     /// Updating Skyward, or how that last ended.
     pub skyward_job: Option<SkywardJob>,
+    /// Timing the mirrors against the build the next update would download,
+    /// or what each one gave the last time.
+    pub weighing: Weighing,
     /// The address typed on the download page, and the taking of it, or how
     /// that last ended.
     pub url: String,
@@ -2245,6 +2264,7 @@ impl Default for State {
             download: None,
             skyward_check: SkywardCheck::Idle,
             skyward_job: None,
+            weighing: Weighing::Idle,
             url: String::new(),
             fetch_job: None,
             adb_wifi: false,
@@ -2553,6 +2573,9 @@ pub enum Effect {
     /// [`App::skyward_ended`].
     UpdateSkyward(Build),
     StopSkywardUpdate,
+    /// Time each of `MIRRORS` against `link`, the build the next update
+    /// would download, telling the rates with [`App::mirrors_weighed`].
+    WeighMirrors(String),
     /// Take what the address holds into internal storage, telling how it
     /// goes with [`App::fetch_progress`] and [`App::fetch_ended`].
     FetchUrl(String),
@@ -4249,6 +4272,20 @@ impl App {
             Err(why) => SkywardCheck::Failed(why),
         };
         if matches!(self.screen(), Screen::Settings | Screen::SkywardUpdate) {
+            self.refresh();
+        }
+    }
+
+    /// What each mirror gave of the build the next update would download, in
+    /// bytes a second, as the pages list them: the quickest of them becomes
+    /// the one the pages go through, and none left answering leaves the one
+    /// chosen as it was.
+    pub fn mirrors_weighed(&mut self, rates: Vec<u64>) {
+        if let Some(quickest) = mirror::quickest(&rates) {
+            self.state.mirror = quickest;
+        }
+        self.state.weighing = Weighing::Weighed(rates);
+        if self.screen() == Screen::SkywardUpdate {
             self.refresh();
         }
     }
@@ -6494,6 +6531,21 @@ impl App {
                     job.stopping = true;
                     self.refresh();
                     return vec![Effect::StopSkywardUpdate];
+                }
+            }
+            // Timing the mirrors asks only for a slice of the file the
+            // update would download, and picks the quickest of them: the
+            // update started after it goes through the one it picked.
+            Action::WeighMirrors => {
+                let build = self.state.skyward_newest().and_then(|n| n.build.clone()).expect("the mirrors are timed against the newest release's build");
+                if !self.state.online() {
+                    self.open(Screen::Wlan);
+                    return self.arrive_at(Screen::Wlan);
+                }
+                if self.state.weighing != Weighing::Asking {
+                    self.state.weighing = Weighing::Asking;
+                    self.refresh();
+                    return vec![Effect::WeighMirrors(build.link)];
                 }
             }
             Action::Unavailable(text) => self.say(text, now),
@@ -11865,6 +11917,28 @@ mod tests {
         assert_eq!(tap_at(&mut app, &f, &i, Action::RebootTo(Target::Recovery), 5000), vec![Effect::Reboot(Target::Recovery)]);
         app.key(Key::Back, 5100);
         assert_eq!(app.screen(), Screen::Settings);
+    }
+
+    #[test]
+    fn the_quickest_mirror_is_the_one_the_next_update_goes_through() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::SkywardUpdate, W, H, PPD);
+        app.state.wlan = Some(connected("Skyward"));
+        app.state.recovery_partitions = true;
+        app.refresh();
+        app.skyward_checked(Ok(skyward_newest(true)));
+        let link = skyward_newest(true).build.unwrap().link;
+        assert_eq!(tap(&mut app, &f, &i, Action::WeighMirrors), vec![Effect::WeighMirrors(link)], "the build's own link is what is timed");
+        assert_eq!(app.state.weighing, Weighing::Asking);
+        assert!(!app.frame(&f, &i).hits.iter().any(|h| h.action == Action::WeighMirrors), "timing them, they are not asked again");
+        let rates = vec![0, 1_000_000, 3_000_000, 0, 0, 500_000];
+        app.mirrors_weighed(rates.clone());
+        assert_eq!(app.state.mirror, 2, "the quickest of them is the one taken");
+        assert_eq!(app.state.weighing, Weighing::Weighed(rates));
+        app.mirrors_weighed(vec![0; 6]);
+        assert_eq!(app.state.mirror, 2, "none answering leaves the one chosen as it was");
+        app.skyward_checked(Ok(skyward_newest(false)));
+        assert!(!app.frame(&f, &i).hits.iter().any(|h| h.action == Action::WeighMirrors), "nothing to time without a build");
     }
 
     #[test]

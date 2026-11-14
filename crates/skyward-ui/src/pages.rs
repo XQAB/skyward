@@ -2,7 +2,7 @@ use crate::app::{
     Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field, FileKind,
     FileOp, FileRow, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows,
     Screen, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink,
-    Wipe, ADDABLE,
+    Weighing, Wipe, ADDABLE,
     BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
     USB_DRIVE_WANTED, WIPES, installs, starting, UrlKey,
 };
@@ -3055,6 +3055,13 @@ pub fn skyward_update(cx: &Ctx) -> Frame {
     out.extend(hits(&through.rows, &[Action::CycleMirror]));
     let y = widgets::footnote(&mut c, t, f, through.bottom, l.pick(MIRROR_UPDATE_NOTE));
     let y = skyward_online(&mut c, cx, y, &mut out);
+    // Timing the mirrors needs a build to time them against, so it is
+    // offered once GitHub has answered with one, and not while an update
+    // that would go through them is under way.
+    let y = match s.skyward_newest().filter(|n| n.newer).and_then(|n| n.build.as_ref()) {
+        Some(_) if !s.updating_skyward() => weigh_mirrors(&mut c, cx, y + t.m.card_gap, &mut out),
+        _ => y,
+    };
     let points = [
         l.pick([
             "新版本从 GitHub 下载，校验 SHA-256 后写入 recovery 分区，不会改动系统和用户数据。",
@@ -3189,6 +3196,36 @@ fn skyward_online(c: &mut Canvas, cx: &Ctx, y: f32, out: &mut Vec<Hit>) -> f32 {
         }
     }
 }
+
+/// Asking this phone's network which mirror it reaches fastest: a slice of
+/// the build the next update would download is asked of each of them, and
+/// the quickest is the one the update after it goes through.
+fn weigh_mirrors(c: &mut Canvas, cx: &Ctx, y: f32, out: &mut Vec<Hit>) -> f32 {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    if s.weighing == Weighing::Asking {
+        return widgets::list(c, t, f, y, &[Row::new(l.pick(WEIGHING)).trail(Trail::None)]).bottom;
+    }
+    let mut row = Row::new(l.pick(WEIGH));
+    let sub = if !s.online() {
+        Some(l.pick(WLAN_FIRST).to_string())
+    } else if let Weighing::Weighed(rates) = &s.weighing {
+        skyward_net::mirror::quickest(rates).map(|quickest| {
+            let (name, rate) = (l.pick(MIRROR_NAMES[quickest]), fmt::file_size(rates[quickest]));
+            tr!(l, "最快是 {name}，{rate}/s", "最快是 {name}，{rate}/秒", "{name} is quickest, at {rate}/s")
+        })
+    } else {
+        None
+    };
+    if let Some(sub) = sub.as_deref() {
+        row = row.subtitle(sub);
+    }
+    let list = widgets::list(c, t, f, y, &[row]);
+    out.extend(hits(&list.rows, &[Action::WeighMirrors]));
+    list.bottom
+}
+
+const WEIGH: Text = ["测速选出最快的镜像", "測速選出最快的鏡像", "Time the mirrors and take the quickest"];
+const WEIGHING: Text = ["正在测速…", "正在測速…", "Timing the mirrors…"];
 
 /// The WLAN switch; then the network chosen and how joining it goes, and
 /// the networks in range, strongest first.
