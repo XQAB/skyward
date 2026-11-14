@@ -170,13 +170,15 @@ bixi 也没有外接显示器的场景，先记着不搬。
 - **pudding 的 `patches/` 不能直接打**：`mariusarva/skyward-pudding` 的补丁是相对
   上游 v0.2.0 的，我们在 v0.3.1 上重建过（`28a34829`），只能读代码挑逻辑，不能
   `git apply`。
-- **pudding 的「补第六条 boot control 服务」我们不缺**：它原本没起
-  `android.hardware.boot-service.qti`，所以「下次启动」读不到、也切不了槽。
-  bixi 的 `devices/bixi.toml` 最后一条 service 就是它
-  （`ready_service = android.hardware.boot.IBootControl/default`，root），
-  `crates/skyward-vab/src/boot.rs` 也是走这个 HAL。要确认的是它**能不能起来**，
-  不是要不要补——界面在它没起来时会直接说
-  「…is not running; the phone's boot control has to be started first」。
+- **pudding 的「补第六条 boot control 服务」在我们这儿不是同一件事**：它切槽是
+  「请 bootloader 换槽」（`set_active` 那一路），缺
+  `android.hardware.boot-service.qti` 就发不出请求；我们的双系统切换**直接写
+  那个槽的 `boot` / `init_boot` 分区**（`switch.rs` 里没有 `bootctl` / `misc` /
+  `set_active`），boot control 只用来**读**两槽状态与「下次启动是哪个槽」。
+  `devices/bixi.toml` 的最后一条 service 就是它，所以 `bixi_extra` 不需要再加
+  第三个 manifest；它起不来时界面报
+  「…is not running; the phone's boot control has to be started first」，
+  而不是猜一个槽去写（见 `docs/dual-boot-bixi.md` 4.1）。
 - **桌面模式 / 截图 / banner**：`echoskies-works/skyward-extra` 这几项要外接显示器
   或桌面概念，bixi 没有这个场景。
 - **super 整包直刷**：`haotian` 0.3.2 文档里的「super 镜像整包直刷：先 discard、4 MiB 一次写、三个窗口读回校验」。风险高，且 bixi 走 A/B 整包，不做。
