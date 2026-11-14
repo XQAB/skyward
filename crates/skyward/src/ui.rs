@@ -2678,8 +2678,13 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.download_ended(end, have(&app, &release), now);
                         fetched = true;
                     }
-                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) | updates::Event::Weighed(_) => {
-                        unreachable!("a download asks nothing of its own, and writes nothing")
+                    updates::Event::Checked(_)
+                    | updates::Event::SkywardChecked(_)
+                    | updates::Event::Writing { .. }
+                    | updates::Event::Timed(_)
+                    | updates::Event::Weighed(_)
+                    | updates::Event::Opened(_) => {
+                        unreachable!("a download asks nothing of its own, writes nothing, and reads no page")
                     }
                 }
             }

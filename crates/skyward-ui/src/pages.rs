@@ -4007,7 +4007,6 @@ const BROWSER_FORGET: Text = ["清空书签", "清空書籤", "Forget every book
 const BROWSER_READ: Text = ["读取", "讀取", "Read"];
 
 /// The keys for the parts of an address that the keyboard buries two layers
-
 /// down, three to a row just above it: `https://`, `http://` and the
 /// mirror's prefix first, then the separators a link is full of, and a row
 /// under them that keeps the address and writes it back.
