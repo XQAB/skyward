@@ -33,7 +33,9 @@ pub fn current_protector(database: &Path, user: u32) -> Result<Option<String>> {
 /// log, and a protector recorded just before it stopped is exactly what
 /// would otherwise be missed.
 fn value(database: &Path, name: &str, user: u32) -> Result<Option<String>> {
-    let db = open_logged(database)?;
+    let scratch = Scratch::of(database)?;
+    let db = rusqlite::Connection::open(&scratch.database)
+        .with_context(|| format!("open {}", scratch.database.display()))?;
     let mut query = db
         .prepare("SELECT value FROM locksettings WHERE name = ?1 AND user = ?2")
         .context("ask the lock settings what they keep")?;
@@ -46,23 +48,46 @@ fn value(database: &Path, name: &str, user: u32) -> Result<Option<String>> {
     row.get(0).with_context(|| format!("read what {name} is for user {user}"))
 }
 
-/// The database as it stood when the phone stopped, with the log beside it
-/// folded in. The phone is not running, so nothing of its is written: the
-/// database, `locksettings.db-wal` and `-shm` are copied into the temporary
-/// directory, and the copy is opened and read there.
-fn open_logged(database: &Path) -> Result<rusqlite::Connection> {
-    let dir = std::env::temp_dir().join(format!("skyward-locksettings-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-    let at = dir.join("locksettings.db");
-    std::fs::copy(database, &at).with_context(|| format!("copy {} to {}", database.display(), at.display()))?;
-    for suffix in ["-wal", "-shm"] {
-        let from = beside(database, suffix);
-        if from.exists() {
-            std::fs::copy(&from, beside(&at, suffix)).with_context(|| format!("copy {}", from.display()))?;
+/// A copy of the phone's database and its log, in a directory of this read's
+/// own. One copy per read: the tests read at once, and a directory named after
+/// the process alone would have one read empty it while another read it, which
+/// fails for no reason the phone would ever give. The directory goes when the
+/// copy does.
+struct Scratch {
+    dir: std::path::PathBuf,
+    database: std::path::PathBuf,
+}
+
+impl Scratch {
+    /// `database`, with its log, copied into a directory no other read takes.
+    fn of(database: &Path) -> Result<Scratch> {
+        // Counted, not named after the process alone, so that a directory a
+        // read leaves behind — a test binary that stopped part way, say — is
+        // not the one the next read copies into.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let number = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("skyward-locksettings-{}-{number}", std::process::id()));
+        std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
+        let database = dir.join("locksettings.db");
+        let scratch = Scratch { dir, database };
+        std::fs::copy(database, &scratch.database)
+            .with_context(|| format!("copy {} to {}", database.display(), scratch.database.display()))?;
+        for suffix in ["-wal", "-shm"] {
+            let from = beside(database, suffix);
+            if from.exists() {
+                std::fs::copy(&from, beside(&scratch.database, suffix)).with_context(|| format!("copy {}", from.display()))?;
+            }
         }
+        Ok(scratch)
     }
-    rusqlite::Connection::open(&at).with_context(|| format!("open {}", at.display()))
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        // The copy is closed by the time this goes; one the temporary
+        // directory does not let go of is left to its own cleaning.
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 /// `path` with `suffix` put after its whole name, as SQLite names its log.
