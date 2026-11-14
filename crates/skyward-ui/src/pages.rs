@@ -249,6 +249,12 @@ pub fn home(cx: &Ctx) -> Frame {
         Some(v) => format!("{} · {v}", i.codename),
         None => i.codename.clone(),
     };
+    // Under the phone's name, where the system runs from: the stock settings
+    // show the slot the build came from the same way.
+    let sub = match i.slot {
+        Some(slot) => format!("{sub} · {}", fmt::slots(l, &[slot])),
+        None => sub,
+    };
     // Under the phone's name the card holds only what asks for something to
     // be done: a battery too low to install on, an update waiting to merge,
     // and a restart into the slot the system does not run from now.
@@ -282,7 +288,35 @@ pub fn home(cx: &Ctx) -> Frame {
     let card = widgets::device_card(&mut c, t, f, y, &i.model, &sub, &rows);
     out.push(Hit { rect: card.rows[0], action: Action::Open(Screen::About) });
     out.extend(card.rows[1..].iter().zip(&opens).filter_map(|(&rect, open)| open.map(|action| Hit { rect, action })));
-    y = card.bottom + t.m.card_gap;
+    // Four readings under the card, as the stock settings put them: the slot
+    // the system runs from, the data partition's lock, the room left, and the
+    // battery.
+    let free = match i.storage.free {
+        Some(bytes) => fmt::gb(bytes),
+        None => l.pick(["未挂载", "未掛載", "Not mounted"]).to_string(),
+    };
+    let none = l.pick(["未知", "未知", "Unknown"]);
+    let stats = [
+        Spec {
+            icon: Outline::Power,
+            label: l.pick(SLOT_STAT),
+            value: match i.slot {
+                Some(slot) => fmt::slots(l, &[slot]),
+                None => none.to_string(),
+            },
+        },
+        Spec { icon: Outline::Lock, label: l.pick(DATA_STAT), value: fmt::data(l, &cx.state.data).to_string() },
+        Spec { icon: Outline::Storage, label: l.pick(FREE_STAT), value: free },
+        Spec {
+            icon: Outline::Battery,
+            label: l.pick(BATTERY_STAT),
+            value: match i.battery.as_ref() {
+                Some(b) => format!("{}%", b.level),
+                None => none.to_string(),
+            },
+        },
+    ];
+    y = widgets::spec_grid(&mut c, t, f, card.bottom + t.m.card_gap, &stats) + t.m.card_gap;
     // On a phone whose WLAN the recovery brings up, the WLAN comes first
     // under the device, as on the stock settings home; with it, where the
     // phone can hold a second system, the two systems.
@@ -3243,6 +3277,12 @@ fn weigh_mirrors(c: &mut Canvas, cx: &Ctx, y: f32, out: &mut Vec<Hit>) -> f32 {
 const WEIGH: Text = ["测速选出最快的镜像", "測速選出最快的鏡像", "Time the mirrors and take the quickest"];
 const WEIGHING: Text = ["正在测速…", "正在測速…", "Timing the mirrors…"];
 const KEPT_BUILD: Text = ["从内部存储刷入镜像", "從內部儲存空間刷入映像檔", "Write a build kept in internal storage"];
+
+/// The four readings under the device card.
+const SLOT_STAT: Text = ["当前槽位", "目前槽位", "Running slot"];
+const DATA_STAT: Text = ["解密状态", "解密狀態", "Data"];
+const FREE_STAT: Text = ["可用空间", "可用空間", "Free space"];
+const BATTERY_STAT: Text = ["电量", "電量", "Battery"];
 
 /// The WLAN switch; then the network chosen and how joining it goes, and
 /// the networks in range, strongest first.
