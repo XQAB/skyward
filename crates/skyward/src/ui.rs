@@ -1876,6 +1876,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let mut weigher: Option<updates::Worker> = None;
     // Taking the file an address typed on the download page holds.
     let mut fetcher: Option<updates::Worker> = None;
+    // Reading the page an address typed on the browser page holds.
+    let mut browser_reader: Option<updates::Worker> = None;
     // The phone sleeps while its screen is off and nothing needs it awake.
     let sleeper = Sleeper::start()?;
     // A uevent may be a charger or a computer attached or taken away: the
@@ -2716,7 +2718,9 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.skyward_ended(end, now);
                         updated = true;
                     }
-                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Timed(_) | updates::Event::Weighed(_) => unreachable!("an update asks nothing of its own"),
+                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Timed(_) | updates::Event::Weighed(_) | updates::Event::Opened(_) => {
+                        unreachable!("an update asks nothing of its own")
+                    }
                 }
             }
         }
@@ -2734,6 +2738,20 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         }
         if weighed {
             weigher = None;
+        }
+        // The browser asked for a page: what came of it is the page the
+        // browser shows, or the file it turned out to be, or why neither.
+        let mut read = false;
+        if let Some(b) = &browser_reader {
+            for ev in b.events() {
+                let updates::Event::Opened(opened) = ev else { unreachable!("a page read writes nothing") };
+                skyward_sys::kmsg(&format!("the browser read an address, and it came {} a page", if opened.is_ok() { "to" } else { "to no" }))?;
+                app.page_opened(opened, now);
+                read = true;
+            }
+        }
+        if read {
+            browser_reader = None;
         }
         let mut taken = false;
         if let Some(t) = &fetcher {
@@ -2753,7 +2771,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.fetch_ended(end, now);
                         taken = true;
                     }
-                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) | updates::Event::Weighed(_) => {
+                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } | updates::Event::Timed(_) | updates::Event::Weighed(_) | updates::Event::Opened(_) => {
                         unreachable!("taking a file from an address asks nothing, and writes nothing")
                     }
                 }
@@ -3466,6 +3484,15 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         fetcher = Some(updates::Worker::start(task, servers.clone())?);
                     }
                     Effect::StopFetch => fetcher.as_ref().context("no file is being taken")?.stop(),
+                    // What an address typed on the browser page holds is read
+                    // as a page, none of it kept: the page shows its words and
+                    // where its links go, and a file it turns out to be goes
+                    // to the download page.
+                    Effect::OpenPage(url) => {
+                        ensure!(browser_reader.is_none(), "a page is being read already");
+                        skyward_sys::kmsg(&format!("reading {url} as a page"))?;
+                        browser_reader = Some(updates::Worker::start(updates::Task::Browse { url }, servers.clone())?);
+                    }
                     // adbd reads the port once, as it starts; asked to listen
                     // on the network it is started again, which the cable's
                     // own transport survives.

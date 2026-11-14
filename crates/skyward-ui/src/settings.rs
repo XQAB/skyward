@@ -61,6 +61,24 @@ pub struct Settings {
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
+    /// What the browser page keeps between starts.
+    pub browser: Browser,
+}
+
+/// A page the browser keeps, as the settings file holds it: where it is and
+/// what it called itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub url: String,
+    pub title: String,
+}
+
+/// The browser page's own settings: the pages kept as bookmarks, oldest
+/// first, which outlast a restart.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Browser {
+    pub bookmarks: Vec<Bookmark>,
 }
 
 /// The install page's options.
@@ -150,6 +168,14 @@ impl Settings {
                 verify: state.verify,
             },
             logs: Logs { kinds: names(&state.logs, &LOGS), to: LOG_PLACES[state.logs_to].to_string() },
+            browser: Browser {
+                bookmarks: state
+                    .browser
+                    .book
+                    .iter()
+                    .map(|sheet| Bookmark { url: sheet.url.clone(), title: sheet.title.clone() })
+                    .collect(),
+            },
         }
     }
 
@@ -215,6 +241,17 @@ impl Settings {
         if let Some(at) = LOG_PLACES.iter().position(|place| *place == self.logs.to) {
             state.logs_to = at;
         }
+        // Pages kept as bookmarks come back as they were kept, less any an
+        // older or newer version wrote differently: the file is the browser's
+        // own page, and nothing here needs a phone to read it.
+        state.browser.book = self
+            .browser
+            .bookmarks
+            .iter()
+            .filter(|bookmark| !bookmark.url.is_empty())
+            .take(crate::app::BOOKMARKS_KEPT)
+            .map(|bookmark| crate::app::Sheet { url: bookmark.url.clone(), title: bookmark.title.clone() })
+            .collect();
     }
 }
 
@@ -357,6 +394,32 @@ mod tests {
         assert!(json.get("language").is_none(), "no language is chosen until one is");
         let never = Settings::of(&State { screen_off: SCREEN_OFF.len() - 1, ..State::default() });
         assert_eq!(never.screen_off, 0, "a screen that stays on");
+    }
+
+    #[test]
+    fn the_pages_kept_as_bookmarks_come_back_with_the_settings() {
+        let state = State {
+            browser: crate::app::Browser {
+                book: vec![
+                    crate::app::Sheet { url: "https://example.com/a".into(), title: "A page".into() },
+                    // A page that gave no title is kept by where it is.
+                    crate::app::Sheet { url: "https://example.com/b".into(), title: String::new() },
+                ],
+                ..crate::app::Browser::default()
+            },
+            ..State::default()
+        };
+        let kept = Settings::read(&Settings::of(&state).text()).unwrap();
+        assert_eq!(kept.browser.bookmarks.len(), 2);
+        let mut back = State::default();
+        kept.apply(&mut back);
+        assert_eq!(back.browser.book, state.browser.book);
+        // A bookmark with no address is one nothing can go to, and is left out.
+        let odd = Settings::read(r#"{ "browser": { "bookmarks": [{ "url": "", "title": "nowhere" }, { "url": "https://example.com/c", "title": "C" }] } }"#).unwrap();
+        let mut shown = State::default();
+        odd.apply(&mut shown);
+        assert_eq!(shown.browser.book.len(), 1);
+        assert_eq!(shown.browser.book[0].url, "https://example.com/c");
     }
 
     #[test]

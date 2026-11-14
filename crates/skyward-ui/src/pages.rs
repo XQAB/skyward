@@ -1,8 +1,8 @@
 use crate::app::{
     Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field, FileKind,
     FileOp, FileRow, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows,
-    Screen, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink,
-    Weighing, Wipe, ADDABLE,
+    Screen, Sheet, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive,
+    UsbLink, Weighing, Wipe, ADDABLE,
     BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
     USB_DRIVE_WANTED, WIPES, installs, starting, UrlKey,
 };
@@ -24,6 +24,7 @@ use skyward_info::{DeviceInfo, VERSION};
 use skyward_install::{Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::Progress;
 use skyward_net::supplicant::Security;
+use skyward_net::web;
 use skyward_net::wlan::{Bands, Network, Power, Stage as Joining};
 use skyward_systems::Who;
 use skyward_vab::{Slot, Standing};
@@ -98,6 +99,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Update => update(cx),
         Screen::SkywardUpdate => skyward_update(cx),
         Screen::Fetch => fetch(cx),
+    Screen::Browser => browser(cx),
         Screen::Modules => modules(cx),
         Screen::Images => images(cx),
         Screen::License => license(cx),
@@ -2329,6 +2331,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(UPDATE)).icon(GREEN, Icon::Layers).trail(Trail::Value(update_value(cx))),
         Row::new(l.pick(FETCH)).icon(BLUE, Icon::Download),
+        Row::new(l.pick(BROWSER)).icon(BLUE, Icon::Globe),
         Row::new(l.pick(MODULES)).icon(PURPLE, Icon::Install),
         Row::new(l.pick(IMAGES)).icon(SLATE, Icon::Backup),
         Row::new(l.pick(ADB_WIFI)).icon(SLATE, Icon::Usb).trail(Trail::Value(l.pick(if s.adb_wifi { AVB_ON } else { AVB_OFF }))),
@@ -2343,6 +2346,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Logs),
         Action::Open(Screen::Update),
         Action::Open(Screen::Fetch),
+        Action::Open(Screen::Browser),
         Action::Open(Screen::Modules),
         Action::Open(Screen::Images),
         Action::SetAdbWifi(!s.adb_wifi),
@@ -3825,7 +3829,185 @@ pub fn fetch(cx: &Ctx) -> Frame {
     Frame { caret: Some(caret), ..Frame::new(t, c, out, l.pick(FETCH), t.m.content_top) }
 }
 
+/// A page read from an address typed on the screen's own keyboard: the
+/// address, how the reading of it went, the page's own words and where its
+/// links go, going back and forward through the pages read, and the pages
+/// kept as bookmarks.
+pub fn browser(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let top = t.m.content_top;
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let (bottom, caret) = browser_page(cx, &mut c, &mut out, top);
+    // What lies past the canvas's bottom was clipped away: a page longer
+    // than the three screens it was drawn on is drawn again on a canvas
+    // tall enough to hold it, which the page then scrolls through.
+    let (c, bottom) = if cx.band.is_none() && bottom + t.m.margin * 2.0 > c.h as f32 {
+        let mut taller = sheet(cx, fitted(t, bottom), t.pal.bg);
+        out.clear();
+        let (bottom, _) = browser_page(cx, &mut taller, &mut out, top);
+        (taller, bottom)
+    } else {
+        (c, bottom)
+    };
+    // The keyboard is held at the bottom of the screen as a strip of its
+    // own, so the page above it scrolls under it.
+    let dock = Some(keyboard_dock(t, f, s, l.pick(BROWSER_READ)));
+    let canvas = if cx.band.is_some() { c } else { fit(c, t, bottom) };
+    Frame { dock, caret: Some(caret), ..Frame::new(t, canvas, out, l.pick(BROWSER), top) }
+}
+
+/// One drawing of the browser page: what it holds from `top` down, and
+/// where its cursor stands. Drawn twice when the page is longer than the
+/// canvas it was first laid out on.
+fn browser_page(cx: &Ctx, c: &mut Canvas, out: &mut Vec<Hit>, top: f32) -> (f32, widgets::Caret) {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let b = &s.browser;
+    let (mut y, caret) = widgets::text_field(c, t, f, top, &b.address);
+    // How the reading of the address goes, where one is under way, or why
+    // the last one did not come to a page.
+    if b.reading {
+        y = widgets::progress_card(c, t, f, y + t.m.card_gap, l.pick(BROWSER_READING), &b.address, None);
+    }
+    if let Some(said) = &b.said {
+        y = widgets::footnote(c, t, f, y + t.m.dp(4.0), said);
+    }
+    // Going back, going forward, reading the address again, and keeping
+    // what is shown: the four a page is worked with. What going back and
+    // forward come to is said on the row, where there is one.
+    let behind = b.back.last().map_or(l.pick(BROWSER_NO_WHERE), Sheet::named);
+    let ahead = b.ahead.last().map_or(l.pick(BROWSER_NO_WHERE), Sheet::named);
+    let keys = widgets::list(c, t, f, y + t.m.dp(10.0), &[
+        Row::new(l.pick(BROWSER_BACK)).trail(Trail::Text(behind)),
+        Row::new(l.pick(BROWSER_AHEAD)).trail(Trail::Text(ahead)),
+        Row::new(l.pick(BROWSER_AGAIN)).trail(Trail::None),
+        Row::new(l.pick(BROWSER_KEEP)).trail(Trail::Switch(b.kept())),
+    ]);
+    out.extend(hits(&keys.rows, &[Action::BrowserBack, Action::BrowserAhead, Action::Browse, Action::BrowserBookmark]));
+    let mut y = keys.bottom;
+    match &b.page {
+        Some(page) => {
+            // The page names itself in its own type, and says where it is,
+            // where that is not the address already over the field.
+            let title = if page.title.is_empty() { page.url.as_str() } else { page.title.as_str() };
+            let mut y0 = widgets::section(c, t, f, y, title);
+            if !page.site.is_empty() && page.site != page.url {
+                y0 = widgets::footnote(c, t, f, y0, &page.site);
+            }
+            if let Some(description) = &page.description {
+                y0 = widgets::paragraph(c, t, f, y0, description);
+            }
+            y = y0;
+            for (i, block) in page.blocks.iter().enumerate() {
+                y = match block {
+                    web::Block::Heading { text, .. } => widgets::section(c, t, f, y, text),
+                    web::Block::Paragraph { text, .. } | web::Block::Code { text, .. } => widgets::paragraph(c, t, f, y, text),
+                    web::Block::Bullet { text, .. } => widgets::paragraph(c, t, f, y, &format!("· {text}")),
+                    web::Block::Quote { text, .. } => widgets::paragraph(c, t, f, y, &format!("｜ {text}")),
+                    // A link is a row that goes where it points, and a file
+                    // the page offers goes to the download page.
+                    web::Block::Link { label, url, download, .. } => {
+                        let name = if label.trim().is_empty() { url.as_str() } else { label.as_str() };
+                        let kind = l.pick(if *download { BROWSER_LINK_FILE } else { BROWSER_LINK_PAGE });
+                        let row = widgets::list(c, t, f, y, &[Row::new(name).subtitle(url).trail(Trail::Value(kind))]);
+                        out.extend(hits(&row.rows, &[Action::BrowserLink(i)]));
+                        row.bottom
+                    }
+                    // The pictures are said, not drawn: this version reads
+                    // the words of a page and where it goes.
+                    web::Block::Image { alt, .. } => {
+                        let said = tr!(l, "［图片］{alt}", "［圖片］{alt}", "[picture] {alt}");
+                        widgets::paragraph(c, t, f, y, &said)
+                    }
+                    web::Block::Form(_) => widgets::paragraph(c, t, f, y, l.pick(BROWSER_FORM)),
+                    web::Block::Rule => widgets::paragraph(c, t, f, y, "──"),
+                };
+            }
+            // What the reader left out, and why, so a page that looks
+            // thinner than the browser it came from says so itself.
+            if !page.forms.is_empty() {
+                let n = page.forms.len();
+                let forms = tr!(
+                    l,
+                    "页面有 {n} 个表单，这一版不显示，也不提交",
+                    "頁面有 {n} 個表單，這一版不顯示，也不提交",
+                    "The page holds {n} form(s), which this version neither shows nor sends"
+                );
+                y = widgets::footnote(c, t, f, y, &forms);
+            }
+            if page.scripts {
+                y = widgets::footnote(c, t, f, y, l.pick(BROWSER_SCRIPTS));
+            }
+            if page.truncated {
+                y = widgets::footnote(c, t, f, y, l.pick(BROWSER_CUT));
+            }
+        }
+        // Nothing read yet: what the page does is said once, under the
+        // controls that do it.
+        None if !b.reading => {
+            y = widgets::footnote(c, t, f, y + t.m.dp(4.0), l.pick(BROWSER_HOW));
+        }
+        None => {}
+    }
+    // The pages kept, by the names they gave themselves, tapped to read
+    // them again, and a last row that takes them all away.
+    if !b.book.is_empty() {
+        y = widgets::section(c, t, f, y, l.pick(BROWSER_BOOKMARKS));
+        let mut rows: Vec<Row> = Vec::with_capacity(b.book.len() + 1);
+        let mut actions: Vec<Action> = Vec::with_capacity(b.book.len() + 1);
+        for (i, sheet) in b.book.iter().enumerate() {
+            rows.push(Row::new(sheet.named()).trail(Trail::Arrow));
+            actions.push(Action::BrowserGo(i));
+        }
+        rows.push(Row::new(l.pick(BROWSER_FORGET)).icon(RED, Icon::Wipe).trail(Trail::None));
+        actions.push(Action::BrowserClearBookmarks);
+        let kept = widgets::list(c, t, f, y, &rows);
+        out.extend(hits(&kept.rows, &actions));
+        y = kept.bottom;
+    }
+    (y, caret)
+}
+
+/// The keyboard held at the bottom of the screen, its keys in the strip's
+/// own coordinates.
+fn keyboard_dock(t: &Theme, f: &Fonts, s: &State, enter: &str) -> Dock {
+    let h = widgets::keyboard_height(t);
+    let mut canvas = Canvas::new(t.m.w, h.ceil() as u32);
+    let keys = widgets::keyboard(&mut canvas, t, f, s.lang, 0.0, s.layer, s.key_held(), enter);
+    Dock { canvas, hits: keys.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }).collect() }
+}
+
+const BROWSER: Text = ["浏览器", "瀏覽器", "Browser"];
+const BROWSER_READING: Text = ["正在读取网页", "正在讀取網頁", "Reading the page"];
+const BROWSER_BACK: Text = ["后退", "上一頁", "Back"];
+const BROWSER_AHEAD: Text = ["前进", "下一頁", "Forward"];
+const BROWSER_AGAIN: Text = ["重新读取", "重新讀取", "Read again"];
+const BROWSER_KEEP: Text = ["存为书签", "存為書籤", "Keep as a bookmark"];
+const BROWSER_NO_WHERE: Text = ["没有", "沒有", "none"];
+const BROWSER_LINK_PAGE: Text = ["网页", "網頁", "page"];
+const BROWSER_LINK_FILE: Text = ["文件", "檔案", "file"];
+const BROWSER_FORM: Text = ["［表单］", "［表單］", "［form］"];
+const BROWSER_SCRIPTS: Text = [
+    "这一页靠脚本画出内容，这里看到的是它最初的文字。",
+    "這一頁靠腳本畫出內容，這裡看到的是它最初的文字。",
+    "This page draws its content with scripts: what is shown here is its first writing.",
+];
+const BROWSER_CUT: Text = [
+    "这一页比能读的长，后面的一段没有读。",
+    "這一頁比能讀的長，後面的一段沒有讀。",
+    "The page was longer than is read here: its later part was left unread.",
+];
+const BROWSER_HOW: Text = [
+    "在上面的地址里输入网址，或直接输入要搜索的词，按回车读取。网页里的链接可以直接点开，文件地址会转到下载页。",
+    "在上面的位址裡輸入網址，或直接輸入要搜尋的詞，按 Enter 讀取。網頁裡的連結可以直接點開，檔案位址會轉到下載頁。",
+    "Type an address in the field above, or the words to search for, and press enter to read it. A link on the page opens with a touch, and an address that holds a file goes to the download page.",
+];
+const BROWSER_BOOKMARKS: Text = ["书签", "書籤", "Bookmarks"];
+const BROWSER_FORGET: Text = ["清空书签", "清空書籤", "Forget every bookmark"];
+const BROWSER_READ: Text = ["读取", "讀取", "Read"];
+
 /// The keys for the parts of an address that the keyboard buries two layers
+
 /// down, three to a row just above it: `https://`, `http://` and the
 /// mirror's prefix first, then the separators a link is full of, and a row
 /// under them that keeps the address and writes it back.

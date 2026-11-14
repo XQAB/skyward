@@ -12,6 +12,7 @@ use skyward_net::http::{self, Servers};
 use skyward_net::mirror;
 use skyward_net::reach::{self, Reach};
 use skyward_net::release::{self, Installed, Release, Unanswered};
+use skyward_net::web;
 use skyward_vab::Slot;
 use std::fs;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -53,6 +54,9 @@ pub enum Task {
     /// Take what `url` holds into `path`: an address the user typed, which
     /// nothing vouches for, so what comes is kept as it comes.
     Fetch { url: String, path: PathBuf },
+    /// Read what `url` holds as a page for the browser page: its words,
+    /// its links and the rest, or the file it turned out to be.
+    Browse { url: String },
     /// Ask `url`'s server what time it keeps: the clock the recovery
     /// started with is the phone's own, and the network has the right one.
     SyncTime { url: String },
@@ -84,6 +88,9 @@ pub enum Event {
     /// in bytes a second, as its place in the list asked; zero where it gave
     /// none.
     Weighed(Vec<u64>),
+    /// What `url` held: a page read, a file it turned out to be, or why
+    /// neither.
+    Opened(Result<web::Opened, String>),
     Ended(End),
 }
 
@@ -232,6 +239,16 @@ impl Worker {
                         let mut refused = |_a: &ureq::Agent| Again::Retry;
                         let end = fetch(&servers, vec![url.clone()], &Sum::Unchecked, &name, &path, &stopping, &using, &tell, &mut refused);
                         tell(Event::Ended(end));
+                    }
+                    // The browser asks for a page the way the download page
+                    // asks for a file: one address, and the answer kept as
+                    // what it turns out to be. A read that fails is told as
+                    // why, so the page can say it.
+                    Task::Browse { url } => {
+                        let a = http::agent(servers.clone());
+                        *using.lock().expect("the agent is not held by a thread that panicked") = Some(a.clone());
+                        let opened = web::open(&a, &url).map_err(|e| format!("{e:#}"));
+                        tell(Event::Opened(opened));
                     }
                     // The build was not downloaded here: it is kept in a place
                     // the user chose, and its image is checked to be Skyward

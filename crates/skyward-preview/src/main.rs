@@ -7,12 +7,13 @@ use skyward_net::github::{Build, Newest};
 use skyward_net::reach::Reach;
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
+use skyward_net::web;
 use skyward_net::wlan::{Bands, Joined, Link, Network, Power, Stage as Joining, Traffic, Wlan};
 use skyward_systems::{Named, Other, Overview, Who};
 use skyward_ui::app::{
     Action, Adding, App, Asked, BackupAt, BackupEnd, BackupEntry, BackupJob, BackupRefusal, Choice, Clip, Damage, Data, DownloadEnd,
     DownloadJob, EraseStop, Field, FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, Install, ItemEnd, JobEnd, Key, Keys,
-    MountFailure, MountRow, Part, PartKind, PartStop, Pick, Place, Screen, SkywardEnd, SkywardJob, SkywardStage, Source, SystemChoice,
+    MountFailure, MountRow, Part, PartKind, PartStop, Pick, Place, Screen, Sheet, SkywardEnd, SkywardJob, SkywardStage, Source, SystemChoice,
     SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
 };
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
@@ -541,6 +542,28 @@ fn main() -> Result<()> {
             app.state.backup_job = job(true, Vec::new(), None, Some(BackupEnd::Refused(BackupRefusal::DataReset)))
         }),
         ("49-advanced-light", Screen::Advanced, false, &|_| {}),
+        ("33-browser-light-empty", Screen::Browser, false, &|_| {}),
+        ("33-browser-light-reading", Screen::Browser, false, &|app| {
+            app.state.browser.address = "https://example.com/a-page".into();
+            app.state.browser.reading = true;
+        }),
+        ("34-browser-light-page", Screen::Browser, false, &|app| {
+            app.state.browser.address = "https://example.com/a-page".into();
+            app.state.browser.page = Some(sample_page());
+            app.state.browser.back = vec![Sheet { url: "https://example.com/".into(), title: "Example".into() }];
+        }),
+        ("35-browser-dark-bookmarks", Screen::Browser, true, &|app| {
+            app.state.browser.address = "https://example.com/a-page".into();
+            app.state.browser.page = Some(sample_page());
+            app.state.browser.book = vec![
+                Sheet { url: "https://example.com/".into(), title: "Example".into() },
+                Sheet { url: "https://skyward.example/release".into(), title: "Skyward, the recovery".into() },
+            ];
+        }),
+        ("36-browser-light-was-file", Screen::Browser, false, &|app| {
+            app.state.browser.address = "https://example.com/build.zip".into();
+            app.state.browser.said = Some("that address is a file: it goes to the download page".into());
+        }),
         ("50-files-light", Screen::Files, false, &|app| app.set_files("/".into(), Ok(sample_root()), LISTED)),
         ("51-files-dark", Screen::Files, true, &|app| app.set_files("/".into(), Ok(sample_root()), LISTED)),
         ("52-file-info-light", Screen::FileInfo, false, &|app| app.state.file = sample_root().into_iter().find(|e| e.name == "init.environ.rc")),
@@ -1394,6 +1417,44 @@ fn sample_bin() -> Vec<FileRow> {
     rest.sort_by_key(|r| r.name.to_lowercase());
     rows.extend(rest);
     rows
+}
+
+/// A page as the browser shows one: the words, the links and the rest a
+/// reader of a page without scripts finds.
+fn sample_page() -> web::Page {
+    let s = web::Style { bold: true, ..web::Style::default() };
+    let plain = web::Style::default();
+    web::Page {
+        url: "https://example.com/a-page".into(),
+        title: "Skyward, a recovery that can be worked with".into(),
+        site: "https://example.com".into(),
+        description: Some("A page read without its scripts or its pictures.".into()),
+        blocks: vec![
+            web::Block::Heading { level: 1, text: "What Skyward does".into(), style: s },
+            web::Block::Paragraph {
+                text: "Skyward 是一个 recovery：解锁、解密、刷整包、备份分区、看文件，都在同一个界面上。这一页里读到的文字，是阅读器从网页最初的 HTML 里取出的。".into(),
+                style: plain,
+            },
+            web::Block::Bullet { text: "整包安装：从内部存储、U 盘或电脑".into(), style: plain },
+            web::Block::Bullet { text: "两槽都写回自己：系统 OTA 覆盖 recovery 之后仍然在".into(), style: plain },
+            web::Block::Bullet { text: "备份与恢复：boot、system、data 和 modem".into(), style: plain },
+            web::Block::Quote { text: "先把手机弄清楚，再动手。".into(), style: plain },
+            web::Block::Link { label: "下载这一版的 zip".into(), url: "https://example.com/skyward.zip".into(), download: true, style: plain },
+            web::Block::Link { label: "从内部存储安装".into(), url: "https://example.com/install".into(), download: false, style: plain },
+            web::Block::Heading { level: 2, text: "装好之后".into(), style: plain },
+            web::Block::Code { text: "fastboot flash recovery skyward.img\nfastboot reboot recovery".into(), style: plain },
+            web::Block::Paragraph {
+                text: "若要从系统更新里保住 recovery，两槽各写一次即可；Skyward 自己在整包安装之后也会这么做。".into(),
+                style: plain,
+            },
+            web::Block::Rule,
+            web::Block::Paragraph { text: "这一页没有脚本，也没有图片，所以它读得下来。".into(), style: plain },
+        ],
+        forms: Vec::new(),
+        scripts: true,
+        cookies: Vec::new(),
+        truncated: false,
+    }
 }
 
 /// Networks in range, as the 13 Ultra's supplicant found them on

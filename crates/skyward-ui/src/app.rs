@@ -26,6 +26,7 @@ use skyward_net::github::{Build, Newest};
 use skyward_net::mirror;
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
+use skyward_net::web;
 use skyward_net::wlan::{Joined, Network, Power, Stage as Joining, Traffic, Wlan};
 use skyward_systems::{Overview, Who};
 use skyward_vab::{BootSlots, Hold, Slot, SnapshotState, Standing};
@@ -110,6 +111,10 @@ pub enum Screen {
     /// A file taken from an address typed on the screen's own keyboard, into
     /// internal storage: the address, and then how the taking of it goes.
     Fetch,
+    /// A page read from an address typed on the screen's own keyboard: its
+    /// words and where its links go, with the pages behind and ahead of it
+    /// and the ones kept as bookmarks.
+    Browser,
     /// Skyward's own licence.
     License,
     /// The interface typeface and the terms it is used under.
@@ -194,6 +199,60 @@ pub enum DownloadEnd {
     Downloaded,
     Stopped,
     Failed(Failure),
+}
+
+/// A page the browser has been to, or keeps: where it is and what it called
+/// itself, so the pages behind and ahead of it can be shown by name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Sheet {
+    pub url: String,
+    pub title: String,
+}
+
+impl Sheet {
+    /// What a page of the browser is called: its title, or where it is when
+    /// it gave none.
+    pub fn named(&self) -> &str {
+        if self.title.is_empty() {
+            &self.url
+        } else {
+            &self.title
+        }
+    }
+}
+
+/// The browser page's state: the address typed, the page read from it, the
+/// pages behind and ahead of it in the order they were read, and the ones
+/// kept as bookmarks, which outlast a restart.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Browser {
+    pub address: String,
+    /// The page shown; none until one has been read.
+    pub page: Option<web::Page>,
+    /// Whether a page is being read now, and the last reading that did not
+    /// come to a page, or what the page would have said about it.
+    pub reading: bool,
+    pub said: Option<String>,
+    /// Where going back goes, the nearest last, and where going forward does
+    /// the same.
+    pub back: Vec<Sheet>,
+    pub ahead: Vec<Sheet>,
+    pub book: Vec<Sheet>,
+}
+
+/// The most bookmarks kept; the oldest goes when another comes.
+pub const BOOKMARKS_KEPT: usize = 40;
+
+impl Browser {
+    /// Whether the page shown is kept as a bookmark.
+    pub fn kept(&self) -> bool {
+        self.page.as_ref().is_some_and(|page| self.book.iter().any(|sheet| sheet.url == page.url))
+    }
+
+    /// What the page shown is called, for the bar over it.
+    pub fn named(&self) -> Option<&str> {
+        self.page.as_ref().map(|page| if page.title.is_empty() { page.url.as_str() } else { page.title.as_str() })
+    }
 }
 
 /// How far asking GitHub for Skyward's newest release has come.
@@ -303,6 +362,24 @@ pub const FETCH_NEEDS_ADDRESS: Text = [
 pub const COPIED: Text = ["已复制，可以在别处粘回来", "已複製，可以在別處貼回來", "Copied, to be pasted back here"];
 /// Said when there is nothing to paste.
 pub const NOTHING_COPIED: Text = ["还没有复制过内容", "還沒有複製過內容", "Nothing has been copied yet"];
+
+/// Said on the browser page when the address field is empty.
+pub const BROWSER_NEEDS_ADDRESS: Text =
+    ["请填写网址，或直接填写要搜索的词", "請填寫網址，或直接填寫要搜尋的詞", "Enter an address, or the words to search for"];
+/// Said when there is no page behind the one shown.
+pub const BROWSER_STARTS_HERE: Text = ["已经是第一页", "已經是第一頁", "This is the first page"];
+/// Said when there is no page ahead of the one shown.
+pub const BROWSER_ENDS_HERE: Text = ["已经是最后一页", "已經是最後一頁", "This is the last page"];
+/// Said when the page has nothing to keep or to show yet.
+pub const BROWSER_NO_PAGE: Text = ["还没有读到网页", "還沒有讀到網頁", "No page has been read yet"];
+/// Said when the address turned out to be a file.
+pub const BROWSER_WAS_FILE: Text = ["这个地址是文件，改在下载页取", "這個位址是檔案，改在下載頁取", "That address is a file: it goes to the download page"];
+/// Said when the page is kept as a bookmark.
+pub const BOOKMARK_KEPT: Text = ["已存为书签", "已存為書籤", "Kept as a bookmark"];
+/// Said when the page is taken out of the bookmarks.
+pub const BOOKMARK_DROPPED: Text = ["已从书签里删去", "已從書籤裡刪去", "Taken out of the bookmarks"];
+/// Said when every bookmark is taken away.
+pub const BOOKMARKS_GONE: Text = ["书签已清空", "書籤已清空", "The bookmarks are gone"];
 
 /// A password typed, which what is printed of it leaves out: the recovery
 /// prints each effect the pages ask for.
@@ -1550,6 +1627,20 @@ pub enum Action {
     Fetch,
     /// Stop taking it.
     StopFetch,
+    /// Read what the address typed on the browser page holds: an address
+    /// where it is one, a search for the words where it names no site.
+    Browse,
+    /// Read the page behind the one shown again, or the one ahead of it.
+    BrowserBack,
+    BrowserAhead,
+    /// Keep the page shown as a bookmark, or take it out of them.
+    BrowserBookmark,
+    /// Read the page behind the link at this place among the page's blocks.
+    BrowserLink(usize),
+    /// Read the page kept as the bookmark at this place.
+    BrowserGo(usize),
+    /// Take every bookmark away, leaving the pages the browser has read.
+    BrowserClearBookmarks,
     /// Have adb listen on the network too, or stop it doing so.
     SetAdbWifi(bool),
     /// Wipe the note in misc that asks the bootloader for the recovery.
@@ -2163,6 +2254,9 @@ pub struct State {
     /// that last ended.
     pub url: String,
     pub fetch_job: Option<DownloadJob>,
+    /// The address typed on the browser page, the page read from it, and
+    /// where that page can go from itself.
+    pub browser: Browser,
     /// adb also listens on the network, so a computer reaches the phone
     /// without the cable; off until it is turned on, and off again at the
     /// next start.
@@ -2278,6 +2372,7 @@ impl Default for State {
             weighing: Weighing::Idle,
             url: String::new(),
             fetch_job: None,
+            browser: Browser::default(),
             adb_wifi: false,
             modules: None,
             mirror: 0,
@@ -2595,6 +2690,9 @@ pub enum Effect {
     /// goes with [`App::fetch_progress`] and [`App::fetch_ended`].
     FetchUrl(String),
     StopFetch,
+    /// Read what the address holds as a page, telling what came of it with
+    /// [`App::page_opened`].
+    OpenPage(String),
     /// Start or stop adb listening on the network.
     AdbWifi(bool),
     /// Read the KernelSU modules under the data partition, and tell the page
@@ -4335,6 +4433,71 @@ impl App {
         job.outcome = Some(end);
         self.wake(now);
         self.refresh();
+    }
+
+    /// Read `url` on the browser page, with the page shown kept for going
+    /// back to; where the network is not joined the WLAN page comes instead,
+    /// and nothing is read while a page is being read already.
+    fn browse(&mut self, url: String) -> Vec<Effect> {
+        if !self.state.online() {
+            self.open(Screen::Wlan);
+            return self.arrive_at(Screen::Wlan);
+        }
+        if self.state.browser.reading {
+            return Vec::new();
+        }
+        if let Some(page) = &self.state.browser.page {
+            let shown = Sheet { url: page.url.clone(), title: page.title.clone() };
+            if shown.url != url {
+                self.state.browser.back.push(shown);
+            }
+        }
+        self.state.browser.ahead.clear();
+        self.read_page(url)
+    }
+
+    /// Read `url` on the browser page, the pages behind and ahead of it as
+    /// they are: what going back and going forward come to.
+    fn read_page(&mut self, url: String) -> Vec<Effect> {
+        if self.state.browser.reading {
+            return Vec::new();
+        }
+        self.state.browser.address = url.clone();
+        self.state.browser.reading = true;
+        self.state.browser.said = None;
+        self.refresh();
+        vec![Effect::OpenPage(url)]
+    }
+
+    /// What reading the address asked for on the browser page came to: the
+    /// page read, lit for the user; the file it turned out to be, which the
+    /// download page takes from there; or why neither.
+    pub fn page_opened(&mut self, opened: Result<web::Opened, String>, now: u64) {
+        self.state.browser.reading = false;
+        match opened {
+            Ok(web::Opened::Page(page)) => {
+                self.state.browser.address = page.url.clone();
+                self.state.browser.said = None;
+                self.state.browser.page = Some(page);
+                self.wake(now);
+            }
+            Ok(web::Opened::File(file)) => {
+                // A page was asked for, and a file came: it goes to the
+                // download page, which asks before taking it.
+                self.state.browser.said = Some(self.state.lang.pick(BROWSER_WAS_FILE).to_string());
+                self.state.url = file.url;
+                self.open(Screen::Fetch);
+                self.refresh();
+                return;
+            }
+            Err(why) => {
+                self.state.browser.said = Some(why);
+                self.wake(now);
+            }
+        }
+        if self.screen() == Screen::Browser {
+            self.refresh();
+        }
     }
 
     /// The KernelSU modules under the data partition, as they were read.
@@ -6402,6 +6565,97 @@ impl App {
                     return vec![Effect::StopFetch];
                 }
             }
+            // The browser reads an address the way the download page takes
+            // one, over the network the WLAN page joins; what it reads is
+            // kept as a page, and a file an address turns out to be goes to
+            // the download page, which asks before taking it.
+            Action::Browse => {
+                let asked = web::address(&self.state.browser.address);
+                if asked.is_empty() {
+                    self.say(self.state.lang.pick(BROWSER_NEEDS_ADDRESS), now);
+                    return Vec::new();
+                }
+                return self.browse(asked);
+            }
+            Action::BrowserBack => {
+                let behind = match self.state.browser.back.pop() {
+                    Some(sheet) => sheet,
+                    None => {
+                        self.say(self.state.lang.pick(BROWSER_STARTS_HERE), now);
+                        return Vec::new();
+                    }
+                };
+                if let Some(page) = &self.state.browser.page {
+                    let shown = Sheet { url: page.url.clone(), title: page.title.clone() };
+                    self.state.browser.ahead.push(shown);
+                }
+                return self.read_page(behind.url);
+            }
+            Action::BrowserAhead => {
+                let onward = match self.state.browser.ahead.pop() {
+                    Some(sheet) => sheet,
+                    None => {
+                        self.say(self.state.lang.pick(BROWSER_ENDS_HERE), now);
+                        return Vec::new();
+                    }
+                };
+                if let Some(page) = &self.state.browser.page {
+                    let shown = Sheet { url: page.url.clone(), title: page.title.clone() };
+                    self.state.browser.back.push(shown);
+                }
+                return self.read_page(onward.url);
+            }
+            Action::BrowserBookmark => {
+                let sheet = match self.state.browser.page.as_ref() {
+                    Some(page) => Sheet { url: page.url.clone(), title: page.title.clone() },
+                    None => {
+                        self.say(self.state.lang.pick(BROWSER_NO_PAGE), now);
+                        return Vec::new();
+                    }
+                };
+                match self.state.browser.book.iter().position(|kept| kept.url == sheet.url) {
+                    Some(at) => {
+                        self.state.browser.book.remove(at);
+                        self.say(self.state.lang.pick(BOOKMARK_DROPPED), now);
+                    }
+                    None => {
+                        // The oldest goes when another comes, so what the file
+                        // holds stays small.
+                        if self.state.browser.book.len() >= BOOKMARKS_KEPT {
+                            self.state.browser.book.remove(0);
+                        }
+                        self.state.browser.book.push(sheet);
+                        self.say(self.state.lang.pick(BOOKMARK_KEPT), now);
+                    }
+                }
+                self.refresh();
+            }
+            Action::BrowserLink(at) => {
+                let Some((url, download)) = self.state.browser.page.as_ref().and_then(|page| page.blocks.get(at)).and_then(|block| match block {
+                    web::Block::Link { url, download, .. } => Some((url.clone(), *download)),
+                    _ => None,
+                }) else {
+                    return Vec::new();
+                };
+                if download {
+                    self.state.url = url;
+                    self.open(Screen::Fetch);
+                    return self.arrive_at(Screen::Fetch);
+                }
+                return self.browse(url);
+            }
+            Action::BrowserGo(at) => {
+                let Some(sheet) = self.state.browser.book.get(at) else { return Vec::new() };
+                let url = sheet.url.clone();
+                return self.browse(url);
+            }
+            Action::BrowserClearBookmarks => {
+                if !self.state.browser.book.is_empty() {
+                    self.state.browser.book.clear();
+                    self.say(self.state.lang.pick(BOOKMARKS_GONE), now);
+                }
+                self.refresh();
+            }
             Action::UrlKey(key) => {
                 if self.screen() == Screen::Fetch {
                     self.state.url.push_str(key.text());
@@ -6587,6 +6841,7 @@ impl App {
             Screen::Rename => &mut self.state.new_name,
             Screen::WlanPassword => &mut self.state.password,
             Screen::Fetch => &mut self.state.url,
+            Screen::Browser => &mut self.state.browser.address,
             Screen::WlanAdd => {
                 let a = self.state.adding.as_mut().expect("the page adds a network");
                 match a.field {
@@ -6801,6 +7056,9 @@ impl App {
                 }
                 // Done on the download page takes what the address holds.
                 Screen::Fetch => return self.act(Action::Fetch, now),
+                // Done on the browser page reads what the address asks for,
+                // an address or a search.
+                Screen::Browser => return self.act(Action::Browse, now),
                 Screen::Decrypt if self.state.code.is_empty() => self.say(l.pick(["请输入锁屏密码", "請輸入螢幕鎖定密碼", "Enter the screen lock"]), now),
                 Screen::Decrypt => {
                     let code = std::mem::take(&mut self.state.code);
