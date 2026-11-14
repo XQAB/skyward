@@ -4443,9 +4443,6 @@ impl App {
             self.open(Screen::Wlan);
             return self.arrive_at(Screen::Wlan);
         }
-        if self.state.browser.reading {
-            return Vec::new();
-        }
         if let Some(page) = &self.state.browser.page {
             let shown = Sheet { url: page.url.clone(), title: page.title.clone() };
             if shown.url != url {
@@ -4457,11 +4454,11 @@ impl App {
     }
 
     /// Read `url` on the browser page, the pages behind and ahead of it as
-    /// they are: what going back and going forward come to.
+    /// they are: what going back and going forward come to. A read already
+    /// in flight is not waited on: tapping a link or going back while a
+    /// slow network holds the last one must still be answered, and the
+    /// device side cuts the old read and starts this one.
     fn read_page(&mut self, url: String) -> Vec<Effect> {
-        if self.state.browser.reading {
-            return Vec::new();
-        }
         self.state.browser.address = url.clone();
         self.state.browser.reading = true;
         self.state.browser.said = None;
@@ -12962,6 +12959,21 @@ mod tests {
         assert!(app.frame(&f, &i).canvas.h > 0, "the blocks read are drawn");
         app.set_avb(Err("no vbmeta partition for slot A".into()));
         assert!(app.frame(&f, &i).canvas.h > 0, "and so is a slot whose blocks could not be read");
+    }
+
+    #[test]
+    fn a_page_asked_for_while_another_is_read_is_read_too() {
+        let mut app = App::new(Screen::Browser, W, H, PPD);
+        app.state.wlan = Some(connected("Skyward"));
+        app.read_page("https://example.com/one".into());
+        assert!(app.state.browser.reading, "the first read is under way");
+        // A slow network holds the first read for as long as its timeouts
+        // allow; the second is asked for anyway, and the device cuts the
+        // first rather than making the tap wait.
+        let second = app.read_page("https://example.com/two".into());
+        assert_eq!(second, vec![Effect::OpenPage("https://example.com/two".into())]);
+        assert_eq!(app.state.browser.address, "https://example.com/two");
+        assert!(app.state.browser.reading, "and it is the read shown as under way");
     }
 
     // The cover of a foldable: 1208 × 1392 beside a 1224 × 2912 screen, at
