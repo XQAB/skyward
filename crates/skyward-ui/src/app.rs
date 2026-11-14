@@ -10946,7 +10946,9 @@ mod tests {
         ];
         app.set_place(Place::Storage, String::new(), Ok(listed), LISTED);
         let shown: Vec<&str> = app.state.storage.entries.as_ref().expect("listed").iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(shown, ["Download", "OTA.ZIP", "boot.img"], "folders and what can be installed, hidden ones left out");
+        // Folders and what can be installed, hidden ones left out, in the
+        // order the page keeps the list in: folders first, then by name.
+        assert_eq!(shown, ["Download", "boot.img", "OTA.ZIP"], "boot.img comes before OTA.ZIP by name, case aside");
         assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::ReadPlace(Place::Storage, "Download".into())]);
         app.set_place(Place::Storage, "Download".into(), Ok(vec![entry("ota.zip", FileKind::File)]), LISTED);
         assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::InstallFile(Place::Storage, "Download/ota.zip".into())]);
