@@ -25,6 +25,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # A tag is cut only for the version the workspace already builds: the number
+  # is compiled in, and a release whose tag and build disagree hands out an
+  # image that calls itself something else. Bump `[workspace.package]` in
+  # Cargo.toml, commit that, and tag that commit.
+  tag:
+    name: Check that the tag names the version built
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Hold the tag against the workspace's version
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME, and the workspace builds version $version"
+            exit 1
+          fi
+
   check:
     name: Lint and test
     runs-on: ubuntu-24.04
@@ -185,7 +203,7 @@ jobs:
   release:
     name: Publish the release
     if: github.ref_type == 'tag'
-    needs: [check, recovery]
+    needs: [tag, check, recovery]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
