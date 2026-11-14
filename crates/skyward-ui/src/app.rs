@@ -11981,7 +11981,6 @@ mod tests {
 
     #[test]
     fn a_skyward_build_kept_in_storage_goes_into_the_recovery_partitions() {
-        let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Install, W, H, PPD);
         app.state.recovery_partitions = true;
         let path = "shuaji/skyward-v1.0.6-bixi-OS4.0.0.11.XOHCNXM.img".to_string();

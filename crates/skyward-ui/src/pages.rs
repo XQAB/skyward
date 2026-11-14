@@ -3058,7 +3058,7 @@ pub fn skyward_update(cx: &Ctx) -> Frame {
     // Timing the mirrors needs a build to time them against, so it is
     // offered once GitHub has answered with one, and not while an update
     // that would go through them is under way.
-    let y = match s.skyward_newest().filter(|n| n.newer).and_then(|n| n.build.as_ref()) {
+    let mut y = match s.skyward_newest().filter(|n| n.newer).and_then(|n| n.build.as_ref()) {
         Some(_) if !s.updating_skyward() => weigh_mirrors(&mut c, cx, y + t.m.card_gap, &mut out),
         _ => y,
     };
