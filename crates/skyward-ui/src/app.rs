@@ -1908,14 +1908,15 @@ impl UrlKey {
 /// offers them: nothing first, so no link is sent through a third party
 /// unless the user picks one. The first three carry GitHub's API as well as
 /// the files it hands out, so they answer which release is the newest too;
-/// the last two only carry the files.
-pub const MIRRORS: [&str; 6] = [
+/// the last one only carries the files. `github.akams.cn` was taken out on
+/// 2026-11-14: it answers 404 for every release asset, as the mirror watch
+/// found twice, two days apart.
+pub const MIRRORS: [&str; 5] = [
     "",
     "https://gh-proxy.com/",
     "https://gh-proxy.org/",
     "https://gh-proxy.cc/",
     "https://ghfast.top/",
-    "https://github.akams.cn/",
 ];
 
 /// A mirror only helps on GitHub's own hosts, so an address there is
@@ -11987,11 +11988,11 @@ mod tests {
         assert_eq!(tap(&mut app, &f, &i, Action::WeighMirrors), vec![Effect::WeighMirrors(link)], "the build's own link is what is timed");
         assert_eq!(app.state.weighing, Weighing::Asking);
         assert!(!app.frame(&f, &i).hits.iter().any(|h| h.action == Action::WeighMirrors), "timing them, they are not asked again");
-        let rates = vec![0, 1_000_000, 3_000_000, 0, 0, 500_000];
+        let rates = vec![0, 1_000_000, 3_000_000, 0, 500_000];
         app.mirrors_weighed(rates.clone());
         assert_eq!(app.state.mirror, 2, "the quickest of them is the one taken");
         assert_eq!(app.state.weighing, Weighing::Weighed(rates));
-        app.mirrors_weighed(vec![0; 6]);
+        app.mirrors_weighed(vec![0; 5]);
         assert_eq!(app.state.mirror, 2, "none answering leaves the one chosen as it was");
         app.skyward_checked(Ok(skyward_newest(false)));
         assert!(!app.frame(&f, &i).hits.iter().any(|h| h.action == Action::WeighMirrors), "nothing to time without a build");

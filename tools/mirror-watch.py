@@ -26,13 +26,14 @@ PROBE_BYTES = 2048
 TIMEOUT = 20
 
 # name, prefix, whether it is expected to carry the API (and not only files)
+# `github.akams.cn` was dropped on 2026-11-14: 404 for every release asset, two
+# probes two days apart, so it stopped being offered on the phone as well.
 MIRRORS = [
     ("direct (GitHub)", "", True),
     ("gh-proxy.com", "https://gh-proxy.com/", True),
     ("gh-proxy.org", "https://gh-proxy.org/", True),
     ("gh-proxy.cc", "https://gh-proxy.cc/", True),
     ("ghfast.top", "https://ghfast.top/", False),
-    ("github.akams.cn", "https://github.akams.cn/", False),
 ]
 
 

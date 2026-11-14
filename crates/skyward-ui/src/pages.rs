@@ -183,13 +183,12 @@ const FONTS: Text = ["界面字体", "介面字型", "UI fonts"];
 const DUAL_BOOT: Text = ["双系统", "雙系統", "Dual boot"];
 const MODULES: Text = ["KernelSU 模块", "KernelSU 模組", "KernelSU modules"];
 const MIRROR: Text = ["加速源", "加速源", "Mirror"];
-const MIRROR_NAMES: [Text; 6] = [
+const MIRROR_NAMES: [Text; 5] = [
     ["不加速", "不加速", "no mirror"],
     ["gh-proxy.com", "gh-proxy.com", "gh-proxy.com"],
     ["gh-proxy.org", "gh-proxy.org", "gh-proxy.org"],
     ["gh-proxy.cc", "gh-proxy.cc", "gh-proxy.cc"],
     ["ghfast.top", "ghfast.top", "ghfast.top"],
-    ["github.akams.cn", "github.akams.cn", "github.akams.cn"],
 ];
 const MIRROR_UPDATE_NOTE: Text = [
     "安装包走你选的这个；检查更新先用能转 GitHub 接口的镜像（gh-proxy），不行再直连。与「下载地址」页共用这一个选择。",
