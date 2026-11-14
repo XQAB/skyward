@@ -2,9 +2,12 @@
 
 2026-11-15，扫的是 `kirklin/skyward` 的全部 forks（
 `https://api.github.com/repos/kirklin/skyward/forks?sort=newest`，40 个，按 pushed
-排）。结论先说：**新推送不等于新功能**——30 多个 fork 的头三个提交都是上游的
-`c5e09f6e`（等模块加载的文件）、`cc68936f`（dada 的第二个 Peach 驱动）、
-`bd34c054`（release 0.3.1），也就是只跟了上游。真正有自己的东西、值得读的只有
+排）。结论先说：**新推送不等于新功能**——大多数 fork 的最新提交就是上游的
+`c5e09f6e`（等模块加载的文件），再往上是 `cc68936f`（dada 的第二个 Peach
+驱动）、`bd34c054`（release 0.3.1）、`b6965423`（Linux 宿主上编译 MTP）、
+`684a2f43` 与 `0b4ee3ec`（UI 状态机拆分），也就是只跟了上游，自己没有任何
+提交。判「只跟上游」要看**上游客栈的最近若干个提交**（至少八个，见第四节），
+只比头三个会把新跟上的 fork 当成有独立工作。真正有自己的东西、值得读的只有
 下面这几个：
 
 | 仓库 | 分支 / 头 | 它自己的东西 |
@@ -88,6 +91,25 @@ api.kkgithub.com），且镜像发来的东西仍要过 release 的 SHA-256。
 来源 `BkaNeko/xaga-skyward` `8f2a0800`（`feat(logd)`：手机自己的启动没起，
 就以 root 起）。我们的日志页读内核日志，值得对照核对一次。
 
+### 9. CI 先打印 stock 基线，再做断言
+
+来源 `Max1937/skyward-a57` `5207c361`（`ci: show what the stock image looks
+like before the kernel job`）。它的口径是：把要拿来比的 stock 那一面先原样
+打印出来（版本、分区、长度），再把自编的产物对着它比；这样断言失败时第一
+眼就知道是「stock 变了」还是「打包错了」，省掉一轮「到底是哪边不同」的
+返工。我们的 `tools/verify-release.py` 也在比 stock 基线（`devices/bixi.toml`
+的 `[stock] version`），已按这个顺序改：报告的第一行先说这一版是拿哪个
+stock 比对的，再往下才是逐项检查。
+
+### 10. roadmap 里写「可复现打包命令」
+
+来源 `ChuiShui233/realme-pineapple-skyward` `a15e7b29`（`docs(roadmap)`：记录
+首张镜像、阻塞项解除与可复现的打包命令）。我们此前只有 CI 里的 yml，没有一
+页写「在别的机器上怎么原样打出来」。已经补进 `docs/roadmap.md`：从 stock 包
+抽 recovery、编译三个产物、`skyward-pack recovery` 的完整命令行、校验、打包
+与 sha256，以及 Windows 上要靠 WSL 的那几句。
+
+
 ## 二、不适用 bixi
 
 - **4.19 内核的两段式 loop device**：`Max1937/skyward-a57` `f2828a52`、`f9f75f58`。bixi 是 SM8750 的新内核，不需要按 4.19 的答法绑 loop。
@@ -116,7 +138,11 @@ api.kkgithub.com），且镜像发来的东西仍要过 release 的 SHA-256。
 ## 四、扫描口径（便于下次复查）
 
 - fork 列表：`GET /repos/kirklin/skyward/forks?sort=newest&per_page=40`；
-- 有没有自己的提交：取每个 fork 的 `GET /repos/{fork}/commits?per_page=8`，与上游
-  头三个提交（`c5e09f6e` / `cc68936f` / `bd34c054`）比对，全等就是「只跟上游」；
+- 有没有自己的提交：取每个 fork 的 `GET /repos/{fork}/commits?per_page=8`，与
+  **上游客栈的最近八个提交**（`c5e09f6e` / `cc68936f` / `bd34c054` / `b6965423`
+  / `684a2f43` / `0b4ee3ec` / `e5f3cf0c` / `31f3978a`）比对，全在这些里面就是
+  「只跟上游」；只看头三个会漏掉后来才跟上的 fork（2026-11-14 那批 own=0 的
+  就是头三个之外还多跟了 b6965423）。更稳的判法是 `merge-base`：fork 的
+  `default_branch` 与上游 `main` 的最近公共祖先是上游 HEAD，就等于只跟上游；
 - 分支结构（aurora 这种把特性放分支上的）：`GET /repos/{fork}/branches`；
 - 逐提交看做了什么：`GET /repos/{fork}/commits?sha={branch}&per_page=30`。
