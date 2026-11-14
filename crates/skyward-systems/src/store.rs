@@ -4,7 +4,7 @@
 //! one stays while the next is written; the other system's is the third.
 
 use crate::state::{Saved, Store};
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use skyward_block::area::HEADER;
 use skyward_vab::Slot;
@@ -32,11 +32,18 @@ impl Store {
     }
 
     /// The entry the installed system's next save goes to: the one its last
-    /// save is not in.
-    pub fn next_save(last: Option<&Saved>) -> u32 {
+    /// save is not in. The three cases are written out, and anything else is
+    /// an error: a wrong number here overwrites the boot set the phone
+    /// starts from, so there is nothing to fall back to.
+    pub fn next_save(last: Option<&Saved>) -> Result<u32> {
         match last {
-            Some(s) if s.entry == 0 => 1,
-            _ => 0,
+            None => Ok(0),
+            Some(s) if s.entry == 0 => Ok(1),
+            Some(s) if s.entry == 1 => Ok(0),
+            Some(s) => bail!(
+                "the installed system's boot set is said to be in entry {}, which is not one of the two its saves take turns between",
+                s.entry
+            ),
         }
     }
 }
@@ -272,8 +279,13 @@ pub(crate) mod tests {
 
     #[test]
     fn the_installed_systems_saves_take_turns() {
-        assert_eq!(Store::next_save(None), 0);
-        assert_eq!(Store::next_save(Some(&Saved { entry: 0, boot: String::new(), init_boot: String::new() })), 1);
-        assert_eq!(Store::next_save(Some(&Saved { entry: 1, boot: String::new(), init_boot: String::new() })), 0);
+        assert_eq!(Store::next_save(None).unwrap(), 0);
+        assert_eq!(Store::next_save(Some(&Saved { entry: 0, boot: String::new(), init_boot: String::new() })).unwrap(), 1);
+        assert_eq!(Store::next_save(Some(&Saved { entry: 1, boot: String::new(), init_boot: String::new() })).unwrap(), 0);
+        // The other system's entry, or a number no entry has: nothing is
+        // guessed, because the guess would land on a boot set to keep.
+        let said = |entry| Some(Saved { entry, boot: String::new(), init_boot: String::new() });
+        assert!(Store::next_save(said(OTHER).as_ref()).is_err(), "the other system's entry is not one of the two");
+        assert!(Store::next_save(said(ENTRIES as u32).as_ref()).is_err(), "an entry past the store is not one of the two");
     }
 }

@@ -84,7 +84,8 @@ fn finish(places: &Places, state: &mut State, init_boot: Option<Vec<u8>>) -> Res
     // While the installed system's boot set is the one in the partitions,
     // it is saved before the other's is written over it.
     if state.occupant(&switching.slot) == Who::Installed && !switching.saved {
-        let entry = crate::state::Store::next_save(state.saved.as_ref());
+        let entry = crate::state::Store::next_save(state.saved.as_ref())
+            .context("which entry the installed system's boot set is saved into")?;
         let saved = store::save(&store, places.store, entry, places.by_name, slot).context("save the installed system's boot set")?;
         state.saved = Some(saved);
         state.switching = Some(Switching { saved: true, ..switching.clone() });
