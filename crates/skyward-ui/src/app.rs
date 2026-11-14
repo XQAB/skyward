@@ -4977,7 +4977,16 @@ impl App {
         // The row a finger holds, drawn once more as held down when it
         // starts darkening, and only that row: a finger that moves on
         // before then never waits for it.
-        if let (Some(press), None) = (self.row_press.filter(|p| now >= p.rise), &self.row_art) {
+        let press = self.row_press.filter(|p| now >= p.rise).filter(|_| self.row_art.is_none());
+        if let Some(press) = press {
+            // A row a finger came down on that the page has not drawn yet,
+            // because it lay below the fold or past the columns drawn, is
+            // drawn first: the row is held at the place the finger found it.
+            self.draw_cols(f, info, self.w);
+            let held = self.frame.as_ref().map_or(0, |fr| fr.canvas.held().end);
+            if press.rect.y + press.rect.h > held as f32 {
+                self.draw_rows(f, info, press.rect.y, press.rect.y + press.rect.h);
+            }
             let page = &self.frame.as_ref().expect("rendered above").canvas;
             let (x, y, w, h) = row_part(press.rect, page);
             let pressed = t.pressed();
