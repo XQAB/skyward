@@ -3424,7 +3424,7 @@ pub fn files(cx: &Ctx) -> Frame {
             let (canvas, rects) = widgets::dock_bar(t, f, files::page(t), &labels);
             Dock { canvas, hits: hits(&rects, &[Action::FilesFind, Action::FilesSort]) }
         }
-    };
+    });
     let button = Some((widgets::Glyph::Terminal, Action::TerminalHere));
     let root = l.pick(["根目录", "根目錄", "Root"]);
     Frame { dock, button, ..listing(cx, &s.files, root, None, l.pick(["暂无文件", "沒有檔案", "No files"]), Action::OpenEntry, l.pick(FILES)) }
