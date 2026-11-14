@@ -1,9 +1,24 @@
-# Skyward for bixi · 1.0.6
+# Skyward for bixi · 1.0.7
 
 > 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
 
+## 1.0.7
+
+1.0.6 只管点击的手感，这一版回到更新页，把「从哪儿下、怎么刷进去」这两件事交给手机自己判断。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| 镜像测速，最快的那个自动选中 | ✅ 已实现（待真机验证） | 新 `crates/skyward-net/src/mirror.rs`：`rate()` 用一次 `Range: bytes=0-…` 只取 256 KiB 并计时，得到这个镜像在这个网络上的字节/秒；拒答、超时、什么都不发的镜像得到错误而不是「最慢」，因为它是没答上来。`quickest()` 是纯算术：零跳过、其余取最大、相等取先出现的；第一个位置是「不加速」（文件直接走 GitHub），所以 GitHub 自己最快时就选回它。更新页在「在线更新」下面多一行「测速选出最快的镜像」，只在 GitHub 已答出「有比本机新的一版」之后出现，量的是这一版真正要下的那个 `link`，量完直接写回 `state.mirror`——接着点「下载并更新」就走它，不用再手动切换；六个全没答上来时保留用户原本的选择 |
+| 本地挑镜像刷（第 4 项的另一半） | ✅ 已实现（待真机验证） | 更新页多一行「从内部存储刷入镜像」。data 分区没打开时照安装页的说法写「请先完成『解密』」并去解密页，已擦除写「data 分区已清除」。挑文件复用现成的 `Screen::Choose(Place::Storage)`，落点在 `App::install_file`：文件名是 Skyward 自己发布的那种（`skyward-…img` / `…zip`）就走 `write_skyward`——把 `skyward_job` 立起来、跳到更新页、交出 `Effect::WriteSkyward`；安装器那条路会把它当 boot 镜像、只写一个槽位，所以不能走。真正写盘的仍是 `updates::write`：先 `upgrade::check` 认这是不是本机的 Skyward 镜像，再写进下次启动那个槽位与另一个装有 Skyward 的槽位，写一段读回一段。`Task::Write` 不下载，也不删用户的文件 |
+| 两处新增断言 | ✅ 桌面跑过 | `the_quickest_mirror_is_the_one_the_next_update_goes_through`：交出去的是 build 自己的 `link`、量的时候不会被点第二次、六个数里最快的被选中、全零时保留原选择、没有新版本时这一行不出现。`a_skyward_build_kept_in_storage_goes_into_the_recovery_partitions`：`skyward-…img` 交 `Effect::WriteSkyward` 且跳更新页、第二次被挡住、之后 `rom.zip` 仍交 `Effect::InstallFile`。`mirror.rs` 自己四条（纯算术，与真 TCP 服务器的 206／404／空包） |
+
+`mirror.rs` 的四条与两条界面断言都由桌面 `cargo test --workspace` 真跑；`rate()` 与 `Task::Weigh`／`Task::Write` 的 Android 侧仍靠 `cargo ndk clippy` 看编译、靠真机看行为。
+
+设备侧同期记录：B 槽已回到官方 `OS4.0.0.11.XOHCNXM`（`boot_completed=1`、`zygote running`、`verifiedbootstate=green`，root 与 11 个模块齐全）；两槽 `recovery` 已 `dd` 成 1.0.6 的裸镜像（写后读回 sha256 与 release 资产 `e22ce90c…fe086` 逐位一致）。1.0.7 上机就是把同一处再 dd 一次，用更新页的「从内部存储刷入镜像」也行。
+
 ## 1.0.6
+
 
 1.0.5 让文件页能搜能排，这一版只动一下点击的手感：从「嗡」变成「嗒」，并且一下比一下重。
 
