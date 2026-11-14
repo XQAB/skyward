@@ -1,7 +1,24 @@
-# Skyward for bixi · 1.0.4
+# Skyward for bixi · 1.0.5
 
 > 机型：小米 MIX Flip 2（`bixi`，SM8750 / `sun`，Android 17，A/B + 动态分区，现役系统 `OS4.0.0.11.XOHCNXM`，出包基线 `OS4.0.0.11.XOHCNXM`）
 > 上游：[kirklin/skyward](https://github.com/kirklin/skyward)；本分支：[`bixi-cover-display-v2`](https://github.com/XQAB/skyward/tree/bixi-cover-display-v2)（PR #38）
+
+## 1.0.5
+
+1.0.4 把装整包这条路修通了，这一版补两块天天用得上的：无线网不再在页面说出是哪个网络之前自己连一遍又被丢掉，文件页能搜、能按类型排。另带两条 CI 改动。
+
+| 项 | 状态 | 关键点 |
+| --- | --- | --- |
+| 开机自动连记住的 WLAN | ✅ 已实现（待真机验证） | 移植 haotian `c2879da6`。症结：`wpa_supplicant` 一启动就被交到记住那个网络的密码，于是它在页面说出是哪个网络之前自己连上了；而这边只认「页面点了网络」之后的加入，supplicant 自发的那一次被丢弃——没人要 DHCP，页面一直说没连上。现在 `joining()` 在 `joined == None` 时收到 `Told::Connected` 就 `adopt()`：用 `STATUS-NO_EVENTS` 读回 `wpa_state == COMPLETED` 与 `ssid`，按 SSID 字节匹配记住的网络，然后像页面选网一样要地址；一个都没接住时每 `POLL`（5 秒）再看一次；页面上正常选网先接上的不再自己接（`joined.is_some()` 时不计入）。本 fork 原本没有 `saved`，是从 `KEPT`（`/data/misc/wifi/skyward/joined`）读 `SET_NETWORK` 的 body 行，现在读成 `Remembered { bodies, ssid, name, security }`，`ssid`／`key_mgmt` 两行缺一即不认；离开网络时清掉记住的，连上新的时重读一遍 |
+| 文件页可搜索 | ✅ 已实现（待真机验证） | 底栏换成「搜索」与「排序」两个按钮。搜索打开后照搜索页的写法：输入框＋右侧取消圆钮，边输边筛（忽略大小写的子串匹配），行号跟着筛后的列表走，点哪行就开哪行；`Back` 在搜索开着时先关搜索；有结果时回车开第一条，没结果不动作。只在界面里，不碰底下 |
+| 文件页可按类型排序 | ✅ 已实现（待真机验证） | 新 `crates/skyward-ui/src/sort.rs`，三种键 `Name`／`Modified`／`Kind` 轮转，**任何键都文件夹在前**（和手机自带文件管理器一致）。`Kind` 的分组照 `FileType` 的列表：压缩包 → 分区镜像 → 图片 → 视频 → 音频 → 安装包 → 文档 → 表格 → 演示 → PDF → 文本 → 代码 → 其它，设备与管道排最后，同组按名。任何键都以忽略大小写的名收尾、再用原名兜底，所以 `IMG_1` 与 `img_1` 挨着却不会比较相等，两次读出来的顺序一样，没有条目会丢或画两遍。`Modified` 新的在前，同一秒按大小分开 |
+| 打 tag 先核对版本 | ✅ 已加 | `build.yml` 在 `check` 前插 `tag` job（`if: github.ref_type == 'tag'`）：`python3 -c` 读 `tomllib` 的 `["workspace"]["package"]["version"]`，与 `GITHUB_REF_NAME` 比对，不等就 `::error` 并 `exit 1`；`release` 的 `needs` 已是 `[tag, check, recovery]`，`tools` 里 `sed` 那步留作保险。流程不变：先 bump `Cargo.toml`、提交、再打 tag |
+| 工具链钉到 1.100.0 | ✅ 已改 | `rust-toolchain.toml` 从跟着 `stable` 漂改成 `channel = "1.100.0"`，本机与 CI 编的是同一个编译器（上游 0.3.1 也是这个版本） |
+
+`crates/skyward-ui` 的这两块随桌面测试跑（`sort.rs` 七条、文件页几条，含「列表按名称排序后第几条是哪一条」）；`crates/skyward` 的 WLAN 改动仍靠 `cargo ndk clippy` 看编译、靠真机看行为——本机没有 Android 目标可编。
+
+`1.0.5` 的资产：`skyward-v1.0.5-bixi-OS4.0.0.11.XOHCNXM.img`（裸镜像，直写 recovery 分区）、
+同名 `.zip`（自更新可直接吃）、`SHA256SUMS`、`skyward-v1.0.5-bixi-OS4.0.0.11.XOHCNXM.verify.txt`（校验报告）。
 
 ## 1.0.4
 

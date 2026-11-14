@@ -109,15 +109,35 @@ fn remember(commands: &[String]) {
     }
 }
 
-/// The network kept from a start that opened the data partition, also as
-/// the words that set it up. Empty where none was kept.
-fn kept_network() -> Vec<String> {
+/// A network kept from a start that opened the data partition: the words
+/// that set it up again, and what the page calls it.
+struct Remembered {
+    /// The words `SET_NETWORK` is given, in the order the supplicant was
+    /// given them.
+    bodies: Vec<String>,
+    ssid: Vec<u8>,
+    name: String,
+    security: Security,
+}
+
+/// The network kept, as those words. Empty where none was kept.
+fn kept_network() -> Vec<Remembered> {
     if home().as_path() == Path::new(HOME) {
         return Vec::new();
     }
-    fs::read_to_string(Path::new(KEPT).join("joined"))
-        .map(|text| text.lines().filter(|l| !l.trim().is_empty()).map(str::to_owned).collect())
-        .unwrap_or_default()
+    let text = fs::read_to_string(Path::new(KEPT).join("joined")).unwrap_or_default();
+    let bodies: Vec<String> = text.lines().filter(|l| !l.trim().is_empty()).map(str::to_owned).collect();
+    let ssid = bodies.iter().find_map(|b| b.strip_prefix("ssid ").and_then(unhex));
+    let security = bodies.iter().find_map(|b| b.strip_prefix("key_mgmt ").and_then(security_of));
+    match (ssid, security) {
+        (Some(ssid), Some(security)) => {
+            let name = String::from_utf8_lossy(&ssid).into_owned();
+            vec![Remembered { bodies, ssid, name, security }]
+        }
+        // One that says neither which network it is nor how it is protected
+        // cannot be set up again.
+        _ => Vec::new(),
+    }
 }
 
 
@@ -220,7 +240,7 @@ impl Worker {
                     let _ = told_tx.send(r);
                     signal(&rung);
                 };
-                let mut s = Station { cfg, modules, libraries, servers, state: Wlan::default(), running: None, back, tell: Box::new(tell) };
+                let mut s = Station { cfg, modules, libraries, servers, state: Wlan::default(), running: None, remembered: Vec::new(), back, tell: Box::new(tell) };
                 s.run(&inbox, &poked);
             })
             .context("start the WLAN thread")?;
@@ -286,6 +306,9 @@ struct Running {
     probed: u64,
     /// When to ask for an address again after the network gave none.
     retry_at: Option<Instant>,
+    /// When to look again for a network the supplicant joined by itself,
+    /// which is how the first start after a network was kept comes up.
+    adopt_at: Instant,
     polled_at: Instant,
     /// What had gone over the interface when last counted, while it has an
     /// address.
@@ -327,6 +350,9 @@ struct Station {
     servers: Servers,
     state: Wlan,
     running: Option<Running>,
+    /// The networks kept on the data partition, read afresh whenever one is
+    /// joined or left or the WLAN comes up.
+    remembered: Vec<Remembered>,
     back: Back,
     tell: Box<dyn Fn(Report) + Send>,
 }
@@ -366,8 +392,11 @@ impl Station {
     fn next(&self) -> Option<Instant> {
         let r = self.running.as_ref()?;
         let poll = matches!(self.state.joined, Some(Joined { stage: Stage::Connected(_), .. })).then(|| r.polled_at + POLL);
+        // A network the supplicant joined by itself is looked for until one
+        // is taken up, which a phone that keeps none never needs.
+        let adopt = (self.state.joined.is_none() && !self.remembered.is_empty()).then_some(r.adopt_at);
         let count = r.lease.as_ref().map(|_| r.counted.map_or_else(Instant::now, |c| c.at + TRAFFIC));
-        [r.lease.as_ref().filter(|_| r.asking.is_none()).map(Held::due), r.retry_at, poll, count].into_iter().flatten().min()
+        [r.lease.as_ref().filter(|_| r.asking.is_none()).map(Held::due), r.retry_at, poll, adopt, count].into_iter().flatten().min()
     }
 
     fn command(&mut self, c: Command) {
@@ -402,6 +431,7 @@ impl Station {
                 self.state.joined = None;
                 // Left behind, it would be joined again on the next start.
                 let _ = fs::remove_file(Path::new(KEPT).join("joined"));
+                self.remembered.clear();
             }
         }
     }
@@ -464,6 +494,7 @@ impl Station {
             asked: 0,
             probed: 0,
             retry_at: None,
+            adopt_at: Instant::now(),
             polled_at: Instant::now(),
             counted: None,
         })
@@ -487,7 +518,7 @@ impl Station {
         self.state.power = Power::Failed(format!("{e:#}"));
     }
 
-    fn join(&self, joined: &Joined, password: &str) -> Result<()> {
+    fn join(&mut self, joined: &Joined, password: &str) -> Result<()> {
         let r = self.running.as_ref().context("the WLAN is off")?;
         r.control.order("REMOVE_NETWORK all")?;
         let id: u32 = r.control.ask("ADD_NETWORK")?.trim().parse().context("wpa_supplicant numbered the network with no number")?;
@@ -505,6 +536,7 @@ impl Station {
         // running memory.
         if self.cfg.remember {
             remember(&commands);
+            self.remembered = kept_network();
         }
         Ok(())
     }
@@ -512,16 +544,21 @@ impl Station {
     /// Join the network kept from a start that opened the data partition,
     /// so that a phone left alone reaches the network it reached before.
     fn resume(&mut self) {
-        if !self.cfg.remember {
+        self.remembered = if self.cfg.remember { kept_network() } else { Vec::new() };
+        if self.remembered.is_empty() || self.running.is_none() {
             return;
         }
-        let kept = kept_network();
-        if kept.is_empty() {
+        // The supplicant is handed the networks whose passwords are kept as it
+        // starts, so by now it may have joined one by itself: that one is taken
+        // up, not added again beside it.
+        self.adopt();
+        if self.state.joined.is_some() {
+            let _ = skyward_sys::kmsg("the WLAN joins the network it joined before");
             return;
         }
         let joined = {
-            let Some(r) = self.running.as_ref() else { return };
-            match Self::join_kept(r, &kept) {
+            let (Some(kept), Some(r)) = (self.remembered.first(), self.running.as_ref()) else { return };
+            match Self::join_kept(r, kept) {
                 Ok(joined) => joined,
                 Err(e) => {
                     let _ = skyward_sys::kmsg(&format!("join the network kept: {e:#}"));
@@ -534,24 +571,13 @@ impl Station {
     }
 
     /// Set up and choose the kept network on a supplicant just started.
-    fn join_kept(r: &Running, kept: &[String]) -> Result<Joined> {
+    fn join_kept(r: &Running, kept: &Remembered) -> Result<Joined> {
         let id: u32 = r.control.ask("ADD_NETWORK")?.trim().parse().context("wpa_supplicant numbered the network with no number")?;
-        let mut security = None;
-        let mut ssid = None;
-        for body in kept {
+        for body in &kept.bodies {
             r.control.order(&format!("SET_NETWORK {id} {body}"))?;
-            let Some((name, value)) = body.split_once(' ') else { continue };
-            match name {
-                "ssid" => ssid = unhex(value),
-                "key_mgmt" => security = security_of(value),
-                _ => {}
-            }
         }
-        let ssid = ssid.context("the network kept has no name")?;
-        let security = security.context("the network kept does not say how it is protected")?;
         r.control.order(&format!("SELECT_NETWORK {id}"))?;
-        let name = String::from_utf8_lossy(&ssid).into_owned();
-        Ok(Joined { ssid, name, security, stage: Stage::Joining })
+        Ok(Joined { ssid: kept.ssid.clone(), name: kept.name.clone(), security: kept.security, stage: Stage::Joining })
     }
 
     /// Read what the supplicant has told.
@@ -592,6 +618,15 @@ impl Station {
     }
 
     fn joining(&mut self, told: &Told) {
+        if self.state.joined.is_none() {
+            // The supplicant joins a network whose password is kept by itself
+            // at the first start, before anything here has said which network
+            // it is about: that is the one thing worth taking up.
+            if matches!(told, Told::Connected) {
+                self.adopt();
+            }
+            return;
+        }
         let Some(j) = &mut self.state.joined else { return };
         match j.on(told) {
             Next::Show => {}
@@ -605,6 +640,45 @@ impl Station {
                 }
             }
         }
+    }
+
+    /// Take up the network the supplicant joined by itself.
+    ///
+    /// The settings it is started with hold the networks whose passwords are
+    /// kept, so at the first start it joins one without being told to — often
+    /// before this thread has attached to its monitor, and so without a word
+    /// heard about it. What it joined is read back here and taken up the way a
+    /// network chosen on the page is, so that an address is asked for and the
+    /// page says what is connected.
+    fn adopt(&mut self) {
+        let Some(r) = &mut self.running else { return };
+        r.adopt_at = Instant::now() + POLL;
+        if self.state.joined.is_some() || self.remembered.is_empty() {
+            return;
+        }
+        // A plain STATUS has Android's supplicant tell every listener again
+        // that the network is connected; this one leaves that out.
+        let status = match r.control.ask("STATUS-NO_EVENTS") {
+            Ok(status) => status,
+            Err(e) => return self.lost(e),
+        };
+        let fields = supplicant::fields(&status);
+        if fields.get("wpa_state") != Some(&"COMPLETED") {
+            return;
+        }
+        let Some(ssid) = fields.get("ssid").and_then(|name| supplicant::unescape(name).ok()) else { return };
+        let Some((name, security)) = self.remembered.iter().find(|k| k.ssid == ssid).map(|k| (k.name.clone(), k.security)) else {
+            // Only a kept network is one the supplicant is set to join, so this
+            // is a connection made by something else, and no page should claim
+            // it.
+            return;
+        };
+        let _ = skyward_sys::kmsg(&format!("the supplicant joined {name} by itself"));
+        // Nothing is being kept for it: it is already among what is kept.
+        self.state.joined = Some(Joined { ssid, name, security, stage: Stage::Joining });
+        // The event it sent, now that the page knows which network it was
+        // about: the address is asked for from there.
+        self.joining(&Told::Connected);
     }
 
     /// Ask the network for an address, on a thread of its own.
@@ -743,6 +817,9 @@ impl Station {
         if r.retry_at.is_some_and(|at| now >= at) {
             r.retry_at = None;
             return self.ask_address();
+        }
+        if self.state.joined.is_none() && now >= r.adopt_at {
+            return self.adopt();
         }
         if r.asking.is_none() {
             if let Some(h) = &r.lease {

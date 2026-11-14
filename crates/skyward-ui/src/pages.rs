@@ -1,7 +1,8 @@
 use crate::app::{
     Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field, FileKind,
-    FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
-    SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe, ADDABLE,
+    FileOp, FileRow, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows,
+    Screen, SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink,
+    Wipe, ADDABLE,
     BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
     USB_DRIVE_WANTED, WIPES, installs, starting, UrlKey,
 };
@@ -3402,19 +3403,84 @@ pub fn wlan_network(cx: &Ctx) -> Frame {
 /// The file manager, every entry of the folder shown, folders first.
 pub fn files(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    // A name being looked for stands over the page, with the keyboard.
+    if s.files.finding() {
+        return files_find(cx);
+    }
     // An entry picked to copy or move goes to the folder shown, from the
-    // bar held at the bottom.
-    let dock = s.clip.as_ref().map(|clip| {
-        let go = l.pick(match clip.op {
-            FileOp::Copy => ["复制到此处", "複製到這裡", "Copy here"],
-            FileOp::Move => ["移动到此处", "移動到這裡", "Move here"],
-        });
-        let (canvas, rects) = widgets::dock_bar(t, f, files::page(t), &[l.pick(CANCEL), go]);
-        Dock { canvas, hits: hits(&rects, &[Action::Unpick, Action::Paste]) }
-    });
+    // bar held at the bottom; with none picked the bar holds the search and
+    // the order instead.
+    let dock = Some(match s.clip.as_ref() {
+        Some(clip) => {
+            let go = l.pick(match clip.op {
+                FileOp::Copy => ["复制到此处", "複製到這裡", "Copy here"],
+                FileOp::Move => ["移动到此处", "移動到這裡", "Move here"],
+            });
+            let (canvas, rects) = widgets::dock_bar(t, f, files::page(t), &[l.pick(CANCEL), go]);
+            Dock { canvas, hits: hits(&rects, &[Action::Unpick, Action::Paste]) }
+        }
+        None => {
+            let labels = [l.pick(FILES_FIND), sort_label(l, s.files.key())];
+            let (canvas, rects) = widgets::dock_bar(t, f, files::page(t), &labels);
+            Dock { canvas, hits: hits(&rects, &[Action::FilesFind, Action::FilesSort]) }
+        }
+    };
     let button = Some((widgets::Glyph::Terminal, Action::TerminalHere));
     let root = l.pick(["根目录", "根目錄", "Root"]);
     Frame { dock, button, ..listing(cx, &s.files, root, None, l.pick(["暂无文件", "沒有檔案", "No files"]), Action::OpenEntry, l.pick(FILES)) }
+}
+
+const FILES_FIND: Text = ["搜索", "搜尋", "Search"];
+
+/// What the file manager's order button says: the key the list is in now,
+/// which the next touch moves on from.
+fn sort_label(l: Lang, key: SortKey) -> &'static str {
+    match key {
+        SortKey::Name => l.pick(["按名称排序", "依名稱排序", "By name"]),
+        SortKey::Modified => l.pick(["按时间排序", "依時間排序", "By time"]),
+        SortKey::Kind => l.pick(["按类型排序", "依類型排序", "By type"]),
+    }
+}
+
+/// The file manager's search: the field a name is typed into, the entries of
+/// the folder shown that hold it, each opening as a row of the list does, and
+/// the keyboard.
+fn files_find(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let m = &t.m;
+    let mut c = page(cx);
+    let mut out = Vec::new();
+    let (at, cancel) = widgets::search_layout(t);
+    let hint = l.pick(["搜索文件", "搜尋檔案", "Search files"]);
+    let field = widgets::search_field(&mut c, t, f, at.x, at.w, at.y + at.h / 2.0, s.files.query(), hint);
+    widgets::cancel_button(&mut c, t, cancel);
+    out.push(Hit { rect: cancel, action: Action::FilesFindClose });
+    let top = field.field.y + field.field.h + m.dp(12.0);
+    let kb_top = m.h as f32 - widgets::keyboard_height(t);
+    let entries: &[FileRow] = s.files.entries.as_ref().map_or(&[], |e| e.as_slice());
+    if s.files.query().trim().is_empty() {
+        let how = l.pick([
+            "输入名称的一部分即可查找，不区分大小写。",
+            "輸入名稱的一部分即可尋找，不分大小寫。",
+            "Type part of a name to find it, in any case.",
+        ]);
+        widgets::footnote(&mut c, t, f, top, how);
+    } else if entries.is_empty() {
+        let typed = s.files.query().trim();
+        let none = tr!(l, "未找到\"{typed}\"", "找不到「{typed}」", "Nothing found for “{typed}”");
+        widgets::list(&mut c, t, f, top, &[Row::new(&none).trail(Trail::None)]);
+    } else {
+        let rows: Vec<_> = entries.iter().map(|e| Row::new(e.name.as_str())).collect();
+        let list = widgets::list(&mut c, t, f, top, &rows);
+        // The keyboard covers what does not fit above it.
+        let shown = list.rows.iter().enumerate().filter(|(_, r)| r.y + r.h <= kb_top);
+        out.extend(shown.map(|(i, &rect)| Hit { rect, action: Action::OpenEntry(i) }));
+    }
+    keyboard_hits(&mut c, t, f, s, l.pick(FILES_FIND), &mut out);
+    if let Some(rect) = field.clear {
+        out.push(Hit { rect, action: Action::ClearSearch });
+    }
+    Frame { back: false, header: false, caret: Some(field.caret), ..Frame::new(t, c, out, l.pick(FILES_FIND), 0.0) }
 }
 
 const CANCEL: Text = ["取消", "取消", "Cancel"];

@@ -743,6 +743,34 @@ pub enum BackupRefusal {
     DataReset,
 }
 
+/// The orders the file manager can list a folder in, besides the one it
+/// always keeps inside them: folders first. The order is
+/// [`crate::sort::sort`]'s.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortKey {
+    /// By name, ignoring case.
+    #[default]
+    Name,
+    /// Most recently changed first.
+    Modified,
+    /// Grouped by what each entry holds, each group by name.
+    Kind,
+}
+
+/// The orders the file page's button goes through, one touch each.
+pub const SORT_KEYS: [SortKey; 3] = [SortKey::Name, SortKey::Modified, SortKey::Kind];
+
+impl SortKey {
+    /// The order the button gives after this one.
+    pub fn next(self) -> SortKey {
+        match self {
+            SortKey::Name => SortKey::Modified,
+            SortKey::Modified => SortKey::Kind,
+            SortKey::Kind => SortKey::Name,
+        }
+    }
+}
+
 /// An entry of a folder, as the file manager lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileRow {
@@ -777,6 +805,16 @@ pub struct Folder {
     pub path: String,
     pub entries: Result<Vec<FileRow>, String>,
     pub listed: i64,
+    /// Every entry the folder was read with, before the search keeps some of
+    /// them and the order sorts them into `entries`, which is what the list
+    /// shows and touches are taken at.
+    all: Vec<FileRow>,
+    /// What the file manager's search field holds.
+    query: String,
+    /// The order the list is in.
+    sort: SortKey,
+    /// Whether the file manager's search field is open over the page.
+    finding: bool,
     /// The folders left for one inside them, outermost first, with how far
     /// each was scrolled.
     left: Vec<(String, f32)>,
@@ -785,7 +823,84 @@ pub struct Folder {
 impl Folder {
     /// The folder at `path`, not read yet.
     pub fn new(path: &str) -> Folder {
-        Folder { path: path.into(), entries: Ok(Vec::new()), listed: 0, left: Vec::new() }
+        Folder {
+            path: path.into(),
+            entries: Ok(Vec::new()),
+            listed: 0,
+            all: Vec::new(),
+            query: String::new(),
+            sort: SortKey::Name,
+            finding: false,
+            left: Vec::new(),
+        }
+    }
+
+    /// Read the folder with `entries`, the folder it was read as being
+    /// `path`, and show them as the search and the order ask.
+    pub fn read(&mut self, path: String, entries: Result<Vec<FileRow>, String>, listed: i64) {
+        // A folder looked in afresh is looked for afresh too: the search
+        // field goes, and what was typed in it with it.
+        if self.path != path {
+            self.query.clear();
+            self.finding = false;
+        }
+        self.path = path;
+        self.all = entries.as_ref().cloned().unwrap_or_default();
+        self.entries = entries;
+        self.listed = listed;
+        self.refill();
+    }
+
+    /// Keep the entries the search finds and put them in the order asked:
+    /// what the list shows is `entries`, so that a row touched opens the
+    /// entry drawn there.
+    fn refill(&mut self) {
+        let Ok(rows) = &mut self.entries else { return };
+        let searched = self.query.trim().to_lowercase();
+        let mut kept: Vec<FileRow> = self.all.iter().filter(|e| searched.is_empty() || e.name.to_lowercase().contains(&searched)).cloned().collect();
+        crate::sort::sort(&mut kept, self.sort);
+        *rows = kept;
+    }
+
+    /// What the search field holds.
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    /// The search field's text, to type into.
+    pub fn query_mut(&mut self) -> &mut String {
+        &mut self.query
+    }
+
+    /// Keep only the entries the search field names, as it is typed.
+    pub fn respected(&mut self) {
+        self.refill();
+    }
+
+    /// Whether the search field is open over the file page.
+    pub fn finding(&self) -> bool {
+        self.finding
+    }
+
+    /// Open the search field over the file page, or put it away with what
+    /// was typed in it: put away, the list shows the whole folder again.
+    pub fn find(&mut self, on: bool) {
+        self.finding = on;
+        if !on {
+            self.query.clear();
+        }
+        self.refill();
+    }
+
+    /// The order the list is in.
+    pub fn key(&self) -> SortKey {
+        self.sort
+    }
+
+    /// Put the list in the order after this one.
+    pub fn cycle(&mut self) {
+        self.sort = self.sort.next();
+        self.refill();
     }
 
     /// The entry at this place in the list.
@@ -1317,6 +1432,13 @@ pub enum Action {
     ClearSearch,
     /// Leave the search, by the round button beside its field.
     CloseSearch,
+    /// Open the file manager's search field over the page, and with it the
+    /// keyboard.
+    FilesFind,
+    /// Put the file manager's search field away.
+    FilesFindClose,
+    /// Put the file manager's list in the next order.
+    FilesSort,
     /// Open the file manager's entry at this place in the folder: a folder
     /// to look in, a text file to edit, or what can be done with any other.
     OpenEntry(usize),
@@ -4559,9 +4681,7 @@ impl App {
             }
         }
         let shown = self.state.folder_mut(screen);
-        shown.path = folder;
-        shown.entries = files;
-        shown.listed = listed;
+        shown.read(folder, files, listed);
         self.refresh();
     }
 
@@ -5648,6 +5768,12 @@ impl App {
                 self.settle_page();
                 self.refresh();
             }
+            // The file manager's search is put away before the page it is
+            // over: the way back out of it is the same one.
+            Action::Back if self.screen() == Screen::Files && self.state.files.finding() => {
+                self.state.files.find(false);
+                self.refresh();
+            }
             Action::Back | Action::CloseSearch => return self.back(now),
             Action::Theme { dark } => {
                 if self.state.dark != dark {
@@ -5951,8 +6077,32 @@ impl App {
                 }
             }
             Action::ClearSearch => {
+                // The file manager's own search is the one over its page.
+                if self.screen() == Screen::Files {
+                    self.state.files.query_mut().clear();
+                    self.state.files.respected();
+                }
                 self.state.search.clear();
                 self.edits += 1;
+                self.refresh();
+            }
+            Action::FilesFind => {
+                self.state.files.find(true);
+                self.state.layer = Layer::Letters;
+                self.edits += 1;
+                self.refresh();
+            }
+            Action::FilesFindClose => {
+                self.state.files.find(false);
+                self.edits += 1;
+                self.refresh();
+            }
+            Action::FilesSort => {
+                self.state.files.cycle();
+                self.edits += 1;
+                // The list is read afresh, so it starts from its top: the
+                // rows are in another order now.
+                *self.top_mut() = (Screen::Files, 0.0, Focus::Unset);
                 self.refresh();
             }
             Action::OpenEntry(i) => {
@@ -6355,6 +6505,8 @@ impl App {
     fn typing(&mut self) -> &mut String {
         match self.screen() {
             Screen::Search => &mut self.state.search,
+            // The file manager's search, over its own page.
+            Screen::Files => self.state.files.query_mut(),
             Screen::Decrypt => &mut self.state.code,
             Screen::Rename => &mut self.state.new_name,
             Screen::WlanPassword => &mut self.state.password,
@@ -6617,8 +6769,21 @@ impl App {
                         }
                     }
                 }
+                // Return in the file manager's search opens the first entry
+                // it found, as the search page's does the feature it found.
+                Screen::Files => {
+                    let found = self.state.files.entries.as_ref().is_ok_and(|e| !e.is_empty()) && !self.state.files.query().trim().is_empty();
+                    if found {
+                        return self.act(Action::OpenEntry(0), now);
+                    }
+                }
                 other => unreachable!("{other:?} shows no keyboard"),
             },
+        }
+        // The list of the file manager's search follows what is typed into
+        // its field, one letter at a time.
+        if matches!(cap, Cap::Char(_) | Cap::Space | Cap::Backspace) && self.screen() == Screen::Files {
+            self.state.files.respected();
         }
         // What is typed shows above the keyboard, which stays as it was
         // while its keys do.
@@ -10747,9 +10912,10 @@ mod tests {
         assert_eq!(app.key(Key::Back, 0), vec![Effect::ReadDir("/".into())], "back climbs a folder");
         assert_eq!(app.screen(), Screen::Files);
         app.set_files("/".into(), Ok(vec![entry("vmlinux", FileKind::File), entry("init.rc", FileKind::File)]), LISTED);
-        assert_eq!(tap(&mut app, &f, &i, Action::OpenEntry(1)), vec![Effect::OpenText("/init.rc".into())], "a text file opens to edit");
+        // The list is in the order the file page keeps it in, by name.
+        assert_eq!(tap(&mut app, &f, &i, Action::OpenEntry(0)), vec![Effect::OpenText("/init.rc".into())], "a text file opens to edit");
         assert_eq!(app.screen(), Screen::Files);
-        tap(&mut app, &f, &i, Action::OpenEntry(0));
+        tap(&mut app, &f, &i, Action::OpenEntry(1));
         assert_eq!(app.screen(), Screen::FileInfo);
         assert_eq!(app.state.file.as_ref().map(|e| e.name.as_str()), Some("vmlinux"));
         app.key(Key::Back, 0);
